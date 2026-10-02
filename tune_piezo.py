@@ -10,7 +10,7 @@ MODE_CONFIG = {
 
         # 1 stepあたりの周波数変化 [Hz/step]
         # 実測値に変更する
-        "freq_per_step": -2500,
+        "freq_per_step": -1280,
     },
 
     "TM210": {
