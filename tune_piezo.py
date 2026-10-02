@@ -4,7 +4,7 @@ import vna_tools
 
 MODE_CONFIG = {
     "TM110": {
-        "axis": 0,
+        "axis": 1,
         "ch": 2,
         "trace": "Trc4",
 
@@ -13,7 +13,7 @@ MODE_CONFIG = {
     },
 
     "TM210": {
-        "axis": 1,
+        "axis": 2,
         "ch": 4,
         "trace": "Trc9",
 
