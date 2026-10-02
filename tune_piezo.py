@@ -9,7 +9,6 @@ MODE_CONFIG = {
         "trace": "Trc4",
 
         # 1 stepあたりの周波数変化 [Hz/step]
-        # 実測値に変更する
         "freq_per_step": -1280,
     },
 
@@ -18,7 +17,7 @@ MODE_CONFIG = {
         "ch": 4,
         "trace": "Trc9",
 
-        # 実測値に変更する
+        # TM210は実測後に変更する
         "freq_per_step": -2500,
     },
 }
@@ -62,7 +61,11 @@ def tune_piezo(
     Returns
     -------
     float or None
-        最終的な共鳴周波数 [GHz]
+        目標周波数に到達した場合：
+            最終共鳴周波数 [GHz]
+
+        失敗した場合：
+            None
     """
 
     mode = mode.upper()
@@ -89,8 +92,6 @@ def tune_piezo(
     print(f"Tolerance      : ±{tolerance_khz:.3f} kHz")
     print(f"Max iterations : {max_iterations}")
 
-    final_f0 = None
-
     for i in range(1, max_iterations + 1):
 
         # 現在の共鳴周波数を取得
@@ -106,7 +107,6 @@ def tune_piezo(
             return None
 
         f0 = f0_hz / 1e9
-        final_f0 = f0
 
         error_hz = target_f0 * 1e9 - f0_hz
         error_khz = error_hz / 1e3
@@ -128,6 +128,7 @@ def tune_piezo(
         required_steps = error_hz / freq_per_step
         move_steps = round(required_steps)
 
+        # 誤差があるのにroundで0になった場合
         if move_steps == 0:
             move_steps = 1 if required_steps > 0 else -1
 
@@ -143,9 +144,8 @@ def tune_piezo(
 
         time.sleep(wait_time)
 
+    # 最大回数まで到達できなかった場合
     print("\nWARNING: Maximum iterations reached.")
+    print("Target frequency was not reached.")
 
-    if final_f0 is not None:
-        print(f"Final frequency : {final_f0:.9f} GHz")
-
-    return final_f0
+    return None
