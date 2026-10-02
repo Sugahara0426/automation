@@ -1,119 +1,125 @@
 import time
-import csv
-import os
-from datetime import datetime
-
-import find_resonance
 import vna_tools
 
 
 def tune_piezo(atc, znb, target_f0, freq_per_step,
                mode="TM110", tolerance_khz=1, max_iterations=50):
+    """
+    Piezoを動かして共鳴周波数を目標値に合わせる。
 
-    # ログファイルの準備
-    date_str = datetime.now().strftime("%Y%m%d")
-    log_dir = f"data/{date_str}/tuning"
-    os.makedirs(log_dir, exist_ok=True)
+    Parameters
+    ----------
+    atc : ANC350 controller
+        Piezoを制御するANC350のオブジェクト
 
-    start_time = datetime.now().strftime("%H%M%S")
-    log_path = f"{log_dir}/{mode}_tuning_{start_time}.csv"
+    znb : VNA resource
+        VNAのオブジェクト
 
-    with open(log_path, "w", newline="") as f:
-        writer = csv.writer(f)
+    target_f0 : float [GHz]
+        目標の共鳴周波数
 
-        writer.writerow([
-            "Iteration",
-            "Current_Frequency_GHz",
-            "Target_Frequency_GHz",
-            "Error_kHz",
-            "Move_Steps"
-        ])
+    freq_per_step : float [Hz/step]
+        Piezoを1 step動かしたときの共鳴周波数の変化量
+        例：+1 stepで周波数が2.5 kHz下がる
+            → -2500 [Hz/step]
 
-    print(f"Tuning log : {log_path}")
+    mode : str
+        "TM110" または "TM210"
+
+    tolerance_khz : float [kHz]
+        目標周波数に対する許容範囲
+
+    max_iterations : int
+        最大調整回数
+    """
+
+
+    # モードごとのVNA設定
+    mode = mode.upper()
+
+    if mode == "TM110":
+        ch = 2
+        trace = "Trc4"
+
+    elif mode == "TM210":
+        ch = 4
+        trace = "Trc9"
+
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    print("\n================================")
+    print("Piezo Frequency Tuning")
+    print("================================")
+    print(f"Mode            : {mode}")
+    print(f"Target          : {target_f0:.9f} GHz")
+    print(f"Freq/step       : {freq_per_step:+.1f} Hz/step")
+    print(f"Tolerance       : ±{tolerance_khz:.1f} kHz")
+    print(f"Max iterations  : {max_iterations}")
 
 
     # チューニング開始
     for i in range(1, max_iterations + 1):
 
-        # VNA測定
-        csv_path = vna_tools.measure_and_save(
+        # VNAから共鳴周波数を取得
+        f0_hz = vna_tools.find_min_freq(
             znb,
-            f"{mode}_tune{i}"
+            ch,
+            trace,
+            threshold=0.5
         )
 
-        # 共鳴周波数を解析
-        results = find_resonance.analyze(csv_path)
+        if f0_hz is None:
+            print("\n共鳴周波数が見つかりませんでした。")
+            return None
 
-        if mode == "TM110":
-            f0 = results["110_Narrow"]["f0"]
-
-        elif mode == "TM210":
-            f0 = results["210_Narrow"]["f0"]
-
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
+        # Hz → GHz
+        f0 = f0_hz / 1e9
 
         # 目標周波数との差
+        # target_f0 : GHz
+        # f0        : GHz
+        # error_khz : kHz
+
         error_khz = (target_f0 - f0) * 1e6
 
         print(f"\n--- Tuning {i} ---")
-        print(f"Current : {f0:.6f} GHz")
-        print(f"Target  : {target_f0:.6f} GHz")
+        print(f"Current : {f0:.9f} GHz")
+        print(f"Target  : {target_f0:.9f} GHz")
         print(f"Error   : {error_khz:+.3f} kHz")
 
-        # 目標 ±1 kHz に入ったら終了
+        # 目標 ± tolerance_khz に入ったら終了
+
         if abs(error_khz) <= tolerance_khz:
-
-            # 到達したこともログに残す
-            with open(log_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    i,
-                    f0,
-                    target_f0,
-                    error_khz,
-                    0
-                ])
-
             print("\nTarget frequency reached.")
-            print(f"Tuning log saved : {log_path}")
-
             return f0
 
-
         # 必要なpiezo step数を計算
-        required_steps = error_khz * 1000 / freq_per_step
+        error_hz = error_khz * 1000  # kHz → Hz
+
+        required_steps = error_hz / freq_per_step
 
         move_steps = round(required_steps)
 
         # 0 stepになった場合
+
         if move_steps == 0:
             move_steps = 1 if required_steps > 0 else -1
 
         print(f"Move    : {move_steps:+d} steps")
 
-        # ログに保存
-        with open(log_path, "a", newline="") as f:
-            writer = csv.writer(f)
-
-            writer.writerow([
-                i,
-                f0,
-                target_f0,
-                error_khz,
-                move_steps
-            ])
-
         # piezoを動かす
+
         atc.move_by_steps(
             1,
             move_steps,
             0.01
         )
 
+        # piezo移動後、少し待つ
         time.sleep(0.1)
 
+    # 最大回数に到達
     print("\nMaximum iterations reached.")
-    print(f"Tuning log saved : {log_path}")
 
     return f0
