@@ -95,45 +95,88 @@ def tune_piezo(
     for i in range(1, max_iterations + 1):
 
         # 現在の共鳴周波数を取得
-        f0_hz = vna_tools.find_min_freq(
+        result = vna_tools.find_min_freq(
             znb,
             ch,
             trace,
             threshold=0.5
         )
 
+        # find_min_freq() は失敗時に
+        # (None, None) を返す場合があるため対応
+        if isinstance(result, tuple):
+            f0_hz = result[0]
+        else:
+            f0_hz = result
+
         if f0_hz is None:
-            print("\nERROR: 共鳴周波数が見つかりませんでした。")
+
+            print(
+                "\nERROR: 共鳴周波数が見つかりませんでした。"
+            )
+
             return None
 
         f0 = f0_hz / 1e9
 
-        error_hz = target_f0 * 1e9 - f0_hz
-        error_khz = error_hz / 1e3
+        error_hz = (
+            target_f0 * 1e9
+            - f0_hz
+        )
+
+        error_khz = (
+            error_hz / 1e3
+        )
 
         print(f"\n--- Tuning {i} ---")
         print(f"Current : {f0:.9f} GHz")
         print(f"Target  : {target_f0:.9f} GHz")
         print(f"Error   : {error_khz:+.3f} kHz")
 
+
         # 許容範囲内なら終了
         if abs(error_khz) <= tolerance_khz:
 
-            print("\nTarget frequency reached.")
-            print(f"Final frequency : {f0:.9f} GHz")
+            print(
+                "\nTarget frequency reached."
+            )
+
+            print(
+                f"Final frequency : "
+                f"{f0:.9f} GHz"
+            )
 
             return f0
 
+
         # 必要step数を計算
-        required_steps = error_hz / freq_per_step
-        move_steps = round(required_steps)
+        required_steps = (
+            error_hz
+            / freq_per_step
+        )
+
+        move_steps = round(
+            required_steps
+        )
 
         # 誤差があるのにroundで0になった場合
         if move_steps == 0:
-            move_steps = 1 if required_steps > 0 else -1
 
-        print(f"Required: {required_steps:+.2f} steps")
-        print(f"Move    : {move_steps:+d} steps")
+            move_steps = (
+                1
+                if required_steps > 0
+                else -1
+            )
+
+        print(
+            f"Required: "
+            f"{required_steps:+.2f} steps"
+        )
+
+        print(
+            f"Move    : "
+            f"{move_steps:+d} steps"
+        )
 
         # Piezo移動
         atc.move_by_steps(
@@ -142,10 +185,19 @@ def tune_piezo(
             0.01
         )
 
-        time.sleep(wait_time)
+        time.sleep(
+            wait_time
+        )
 
-    # 最大回数まで到達できなかった場合
-    print("\nWARNING: Maximum iterations reached.")
-    print("Target frequency was not reached.")
+
+    # 最大回数まで合わせられなかった
+
+    print(
+        "\nWARNING: Maximum iterations reached."
+    )
+
+    print(
+        "Target frequency was not reached."
+    )
 
     return None
