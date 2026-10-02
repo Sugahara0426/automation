@@ -1,15 +1,15 @@
 import time
 import vna_tools
 
-# モードごとの設定
+
 MODE_CONFIG = {
     "TM110": {
         "axis": 0,
         "ch": 2,
         "trace": "Trc4",
 
-        # Piezo 1 stepあたりの周波数変化 [Hz/step]
-        # 実測後に変更する
+        # 1 stepあたりの周波数変化 [Hz/step]
+        # 実測値に変更する
         "freq_per_step": -2500,
     },
 
@@ -18,14 +18,12 @@ MODE_CONFIG = {
         "ch": 4,
         "trace": "Trc9",
 
-        # 実測後に変更する
+        # 実測値に変更する
         "freq_per_step": -2500,
     },
 }
 
 
-
-# Piezo feedback
 def tune_piezo(
     atc,
     znb,
@@ -41,7 +39,7 @@ def tune_piezo(
     Parameters
     ----------
     atc :
-        Attocube ANC350オブジェクト
+        ANC350オブジェクト
 
     znb :
         VNAオブジェクト
@@ -56,7 +54,7 @@ def tune_piezo(
         許容誤差 [kHz]
 
     max_iterations : int
-        最大フィードバック回数
+        最大調整回数
 
     wait_time : float
         Piezo移動後の待ち時間 [s]
@@ -65,7 +63,6 @@ def tune_piezo(
     -------
     float or None
         最終的な共鳴周波数 [GHz]
-        共鳴が見つからなかった場合はNone
     """
 
     mode = mode.upper()
@@ -96,8 +93,7 @@ def tune_piezo(
 
     for i in range(1, max_iterations + 1):
 
-        # 現在の共鳴周波数を測定
-
+        # 現在の共鳴周波数を取得
         f0_hz = vna_tools.find_min_freq(
             znb,
             ch,
@@ -112,7 +108,6 @@ def tune_piezo(
         f0 = f0_hz / 1e9
         final_f0 = f0
 
-        # target - current
         error_hz = target_f0 * 1e9 - f0_hz
         error_khz = error_hz / 1e3
 
@@ -121,8 +116,7 @@ def tune_piezo(
         print(f"Target  : {target_f0:.9f} GHz")
         print(f"Error   : {error_khz:+.3f} kHz")
 
-        # 目標範囲に入ったら終了
-
+        # 許容範囲内なら終了
         if abs(error_khz) <= tolerance_khz:
 
             print("\nTarget frequency reached.")
@@ -132,16 +126,13 @@ def tune_piezo(
 
         # 必要step数を計算
         required_steps = error_hz / freq_per_step
-
         move_steps = round(required_steps)
 
-        # round()の結果が0だが、まだ許容範囲外の場合
         if move_steps == 0:
             move_steps = 1 if required_steps > 0 else -1
 
         print(f"Required: {required_steps:+.2f} steps")
         print(f"Move    : {move_steps:+d} steps")
-
 
         # Piezo移動
         atc.move_by_steps(
