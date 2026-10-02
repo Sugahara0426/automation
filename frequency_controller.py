@@ -145,6 +145,46 @@ def check_target_range(mode, target_frequency):
 
 
 # ============================================================
+# VNAデータ保存
+# ============================================================
+
+def save_vna_data(
+    znb,
+    mode,
+    target_frequency
+):
+
+    suffix = (
+        f"{mode}_"
+        f"{target_frequency:.6f}GHz"
+    )
+
+    print("\n======================================")
+    print("Saving VNA data")
+    print("======================================")
+
+    print(f"Suffix : {suffix}")
+
+    # VNAデータ保存
+    vna_tools.measure_and_save(
+        znb,
+        suffix_arg=suffix
+    )
+
+    print("VNA data saved.")
+
+    # measure_and_save() 内でContinuous OFFにしているため、
+    # 次の周波数調整に備えて再びONにする
+    for ch in range(1, 5):
+
+        znb.write(
+            f"INITiate{ch}:CONTinuous ON"
+        )
+
+    print("VNA continuous sweep restarted.")
+
+
+# ============================================================
 # Controller本体
 # ============================================================
 
@@ -218,7 +258,9 @@ def run_controller(atc):
                     )
 
                     if command is None:
+
                         print("Command skipped.")
+
                         continue
 
                     mode, target_frequency = command
@@ -279,7 +321,7 @@ def run_controller(atc):
                         continue
 
                     # ----------------------------------------
-                    # 結果表示
+                    # 調整失敗
                     # ----------------------------------------
 
                     if final_f0 is None:
@@ -288,31 +330,80 @@ def run_controller(atc):
                             "\nFrequency tuning failed."
                         )
 
-                    else:
+                        print(
+                            "VNA data will NOT be saved."
+                        )
 
-                        error_khz = (
+                        print(
+                            "\nWaiting for next "
+                            "frequency command..."
+                        )
+
+                        continue
+
+                    # ----------------------------------------
+                    # 調整成功
+                    # ----------------------------------------
+
+                    error_khz = (
+                        target_frequency
+                        - final_f0
+                    ) * 1e6
+
+                    print(
+                        "\n======================================"
+                    )
+
+                    print(
+                        "Frequency tuning finished"
+                    )
+
+                    print(
+                        "======================================"
+                    )
+
+                    print(
+                        f"Final : "
+                        f"{final_f0:.9f} GHz"
+                    )
+
+                    print(
+                        f"Error : "
+                        f"{error_khz:+.3f} kHz"
+                    )
+
+                    # ----------------------------------------
+                    # VNAデータ保存
+                    # ----------------------------------------
+
+                    try:
+
+                        save_vna_data(
+                            znb,
+                            mode,
                             target_frequency
-                            - final_f0
-                        ) * 1e6
-
-                        print(
-                            "\nFrequency tuning finished."
                         )
 
-                        print(
-                            f"Final : "
-                            f"{final_f0:.9f} GHz"
-                        )
+                    except Exception as e:
 
                         print(
-                            f"Error : "
-                            f"{error_khz:+.3f} kHz"
+                            "\nERROR during VNA data saving:"
                         )
+
+                        print(e)
+
+                    # ----------------------------------------
+                    # 次の命令待ち
+                    # ----------------------------------------
 
                     print(
                         "\nWaiting for next "
                         "frequency command..."
                     )
+
+    # --------------------------------------------------------
+    # Ctrl+Cで終了
+    # --------------------------------------------------------
 
     except KeyboardInterrupt:
 
@@ -321,13 +412,20 @@ def run_controller(atc):
             "by user."
         )
 
+    # --------------------------------------------------------
+    # 終了処理
+    # --------------------------------------------------------
+
     finally:
 
         print("\nClosing Kafka consumer...")
+
         consumer.close()
 
         print("Closing VNA...")
+
         znb.close()
+
         rm.close()
 
 
@@ -341,7 +439,10 @@ if __name__ == "__main__":
     print("Starting Frequency Controller")
     print("======================================")
 
+    # --------------------------------------------------------
     # ANC350接続
+    # --------------------------------------------------------
+
     print("\nConnecting to ANC350...")
 
     atc = Attocube.ANC350()
