@@ -3,10 +3,28 @@ import json
 from kafka import KafkaProducer
 
 
-# 設定
+
+# Kafka設定
 
 KAFKA_SERVER = "10.105.52.103:9092"
 KAFKA_TOPIC = "frequency_control"
+
+
+
+# VNA Narrow sweep範囲
+
+VNA_NARROW_RANGE = {
+    "TM110": {
+        "min_ghz": 1.8954,
+        "max_ghz": 1.8994,
+    },
+
+    "TM210": {
+        "min_ghz": 2.5639,
+        "max_ghz": 2.5679,
+    },
+}
+
 
 # Producer
 
@@ -34,6 +52,9 @@ class FrequencyCommandProducer:
         target_frequency
     ):
 
+
+        # Mode確認
+
         mode = mode.upper()
 
         if mode not in ("TM110", "TM210"):
@@ -42,9 +63,45 @@ class FrequencyCommandProducer:
                 f"Unknown mode: {mode}"
             )
 
-        target_frequency = float(
-            target_frequency
-        )
+        # 周波数をfloatに変換
+
+        try:
+
+            target_frequency = float(
+                target_frequency
+            )
+
+        except (TypeError, ValueError):
+
+            raise ValueError(
+                "target_frequency must be a number."
+            )
+
+        # VNA範囲チェック
+        # 範囲外ならKafkaへ送信しない
+
+        freq_range = VNA_NARROW_RANGE[mode]
+
+        min_freq = freq_range["min_ghz"]
+        max_freq = freq_range["max_ghz"]
+
+        if not (
+            min_freq
+            <= target_frequency
+            <= max_freq
+        ):
+
+            raise ValueError(
+                "\nTarget frequency is outside VNA range.\n"
+                f"Mode   : {mode}\n"
+                f"Target : {target_frequency:.9f} GHz\n"
+                f"Range  : "
+                f"{min_freq:.9f} - "
+                f"{max_freq:.9f} GHz\n"
+                "Kafka message was NOT sent."
+            )
+
+        # Kafka message
 
         message = {
             "command": "tune",
@@ -55,12 +112,13 @@ class FrequencyCommandProducer:
         print("\nSending frequency command:")
         print(message)
 
+        # Kafkaへ送信
+
         future = self.producer.send(
             self.kafka_topic,
             value=message
         )
 
-        # Kafkaへの送信完了を確認
         future.get(timeout=10)
 
         print("Frequency command sent.")
@@ -73,7 +131,6 @@ class FrequencyCommandProducer:
 
 
 # 単体テスト
-
 if __name__ == "__main__":
 
     producer = FrequencyCommandProducer()
@@ -82,7 +139,7 @@ if __name__ == "__main__":
 
         producer.send_target(
             mode="TM110",
-            target_frequency=1.906
+            target_frequency=1.8974
         )
 
     finally:
