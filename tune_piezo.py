@@ -1,67 +1,103 @@
 import time
 import vna_tools
 
+# モードごとの設定
+MODE_CONFIG = {
+    "TM110": {
+        "axis": 0,
+        "ch": 2,
+        "trace": "Trc4",
 
-def tune_piezo(atc, znb, target_f0, freq_per_step,
-               mode="TM110", tolerance_khz=1, max_iterations=50):
+        # Piezo 1 stepあたりの周波数変化 [Hz/step]
+        # 実測後に変更する
+        "freq_per_step": -2500,
+    },
+
+    "TM210": {
+        "axis": 1,
+        "ch": 4,
+        "trace": "Trc9",
+
+        # 実測後に変更する
+        "freq_per_step": -2500,
+    },
+}
+
+
+
+# Piezo feedback
+def tune_piezo(
+    atc,
+    znb,
+    target_f0,
+    mode="TM110",
+    tolerance_khz=1.0,
+    max_iterations=50,
+    wait_time=0.1,
+):
     """
     Piezoを動かして共鳴周波数を目標値に合わせる。
 
     Parameters
     ----------
-    atc : ANC350 controller
-        Piezoを制御するANC350のオブジェクト
+    atc :
+        Attocube ANC350オブジェクト
 
-    znb : VNA resource
-        VNAのオブジェクト
+    znb :
+        VNAオブジェクト
 
-    target_f0 : float [GHz]
-        目標の共鳴周波数
-
-    freq_per_step : float [Hz/step]
-        Piezoを1 step動かしたときの共鳴周波数の変化量
-        例：+1 stepで周波数が2.5 kHz下がる
-            → -2500 [Hz/step]
+    target_f0 : float
+        目標共鳴周波数 [GHz]
 
     mode : str
         "TM110" または "TM210"
 
-    tolerance_khz : float [kHz]
-        目標周波数に対する許容範囲
+    tolerance_khz : float
+        許容誤差 [kHz]
 
     max_iterations : int
-        最大調整回数
+        最大フィードバック回数
+
+    wait_time : float
+        Piezo移動後の待ち時間 [s]
+
+    Returns
+    -------
+    float or None
+        最終的な共鳴周波数 [GHz]
+        共鳴が見つからなかった場合はNone
     """
 
-
-    # モードごとのVNA設定
     mode = mode.upper()
 
-    if mode == "TM110":
-        ch = 2
-        trace = "Trc4"
-
-    elif mode == "TM210":
-        ch = 4
-        trace = "Trc9"
-
-    else:
+    if mode not in MODE_CONFIG:
         raise ValueError(f"Unknown mode: {mode}")
+
+    config = MODE_CONFIG[mode]
+
+    axis = config["axis"]
+    ch = config["ch"]
+    trace = config["trace"]
+    freq_per_step = config["freq_per_step"]
 
     print("\n================================")
     print("Piezo Frequency Tuning")
     print("================================")
-    print(f"Mode            : {mode}")
-    print(f"Target          : {target_f0:.9f} GHz")
-    print(f"Freq/step       : {freq_per_step:+.1f} Hz/step")
-    print(f"Tolerance       : ±{tolerance_khz:.1f} kHz")
-    print(f"Max iterations  : {max_iterations}")
+    print(f"Mode           : {mode}")
+    print(f"Axis           : {axis}")
+    print(f"VNA channel    : {ch}")
+    print(f"Trace          : {trace}")
+    print(f"Target         : {target_f0:.9f} GHz")
+    print(f"Freq/step      : {freq_per_step:+.3f} Hz/step")
+    print(f"Tolerance      : ±{tolerance_khz:.3f} kHz")
+    print(f"Max iterations : {max_iterations}")
 
+    final_f0 = None
 
-    # チューニング開始
     for i in range(1, max_iterations + 1):
 
-        # VNAから共鳴周波数を取得
+        # 現在の共鳴周波数を測定
+
         f0_hz = vna_tools.find_min_freq(
             znb,
             ch,
@@ -70,56 +106,55 @@ def tune_piezo(atc, znb, target_f0, freq_per_step,
         )
 
         if f0_hz is None:
-            print("\n共鳴周波数が見つかりませんでした。")
+            print("\nERROR: 共鳴周波数が見つかりませんでした。")
             return None
 
-        # Hz → GHz
         f0 = f0_hz / 1e9
+        final_f0 = f0
 
-        # 目標周波数との差
-        # target_f0 : GHz
-        # f0        : GHz
-        # error_khz : kHz
-
-        error_khz = (target_f0 - f0) * 1e6
+        # target - current
+        error_hz = target_f0 * 1e9 - f0_hz
+        error_khz = error_hz / 1e3
 
         print(f"\n--- Tuning {i} ---")
         print(f"Current : {f0:.9f} GHz")
         print(f"Target  : {target_f0:.9f} GHz")
         print(f"Error   : {error_khz:+.3f} kHz")
 
-        # 目標 ± tolerance_khz に入ったら終了
+        # 目標範囲に入ったら終了
 
         if abs(error_khz) <= tolerance_khz:
+
             print("\nTarget frequency reached.")
+            print(f"Final frequency : {f0:.9f} GHz")
+
             return f0
 
-        # 必要なpiezo step数を計算
-        error_hz = error_khz * 1000  # kHz → Hz
-
+        # 必要step数を計算
         required_steps = error_hz / freq_per_step
 
         move_steps = round(required_steps)
 
-        # 0 stepになった場合
-
+        # round()の結果が0だが、まだ許容範囲外の場合
         if move_steps == 0:
             move_steps = 1 if required_steps > 0 else -1
 
+        print(f"Required: {required_steps:+.2f} steps")
         print(f"Move    : {move_steps:+d} steps")
 
-        # piezoを動かす
 
+        # Piezo移動
         atc.move_by_steps(
-            1,
+            axis,
             move_steps,
             0.01
         )
 
-        # piezo移動後、少し待つ
-        time.sleep(0.1)
+        time.sleep(wait_time)
 
-    # 最大回数に到達
-    print("\nMaximum iterations reached.")
+    print("\nWARNING: Maximum iterations reached.")
 
-    return f0
+    if final_f0 is not None:
+        print(f"Final frequency : {final_f0:.9f} GHz")
+
+    return final_f0
