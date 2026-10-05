@@ -11,9 +11,18 @@ from pylablib.devices import Attocube
 import vna_tools
 from tune_piezo import tune_piezo
 
-# 基本設定
-KAFKA_SERVER = "10.105.52.103:9092"
 
+# 保存場所をfrequency_controller.pyの場所に固定
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
+os.chdir(BASE_DIR)
+
+
+# 基本設定
+
+KAFKA_SERVER = "10.105.52.103:9092"
 KAFKA_TOPIC = "frequency_control"
 
 VNA_RESOURCE = (
@@ -22,15 +31,6 @@ VNA_RESOURCE = (
 
 
 # VNA Narrow sweep範囲
-# TM110:
-#   center = 1.8974 GHz
-#   span   = 4 MHz
-#   range  = 1.8954 - 1.8994 GHz
-#
-# TM210:
-#   center = 2.5659 GHz
-#   span   = 4 MHz
-#   range  = 2.5639 - 2.5679 GHz
 
 VNA_NARROW_RANGE = {
 
@@ -213,30 +213,34 @@ def check_target_range(
     return False
 
 
+
 # VNAデータ保存 + グラフ保存
 
 def save_vna_data(
     znb,
     mode,
-    target_frequency
+    target_frequency,
+    tuning_index,
+    current_frequency
 ):
 
     suffix = (
         f"{mode}_"
-        f"{target_frequency:.6f}GHz"
+        f"{target_frequency:.6f}GHz_"
+        f"tuning{tuning_index:02d}"
     )
 
     print("\n======================================")
-    print("Saving VNA data")
+    print(
+        f"Saving VNA data - Tuning {tuning_index}"
+    )
     print("======================================")
 
     print(
         f"Suffix : {suffix}"
     )
 
-
     # VNAデータ保存
-
     summary_filename = (
         vna_tools.measure_and_save(
             znb,
@@ -248,9 +252,7 @@ def save_vna_data(
         "VNA data saved."
     )
 
-
     # Narrow modeを選択
-
     if mode == "TM110":
 
         measurement_mode = (
@@ -270,7 +272,6 @@ def save_vna_data(
         )
 
     # CSV読み込み
-
     frequencies = []
     s11_amplitudes = []
 
@@ -312,7 +313,6 @@ def save_vna_data(
             )
 
     # データが取得できたか確認
-
     if not frequencies:
 
         raise RuntimeError(
@@ -336,9 +336,11 @@ def save_vna_data(
         s11_amplitudes[min_index]
     )
 
+    # tune_piezo側と同じく
+    # Error = Target - Resonance とする
     error_khz = (
-        resonance_frequency
-        - target_frequency
+        target_frequency
+        - resonance_frequency
     ) * 1e6
 
     print(
@@ -360,7 +362,9 @@ def save_vna_data(
         f"{error_khz:+.3f} kHz"
     )
 
+
     # Plot
+
     plt.figure(
         figsize=(8, 6)
     )
@@ -372,7 +376,6 @@ def save_vna_data(
         label="S11"
     )
 
-
     # Target周波数
     plt.axvline(
         target_frequency,
@@ -383,9 +386,7 @@ def save_vna_data(
         )
     )
 
-
     # Resonance周波数
-
     plt.axvline(
         resonance_frequency,
         linestyle=":",
@@ -402,16 +403,13 @@ def save_vna_data(
         zorder=5
     )
 
-
     # 周波数情報を画像内に表示
-
     info_text = (
-        f"Target    : "
-        f"{target_frequency:.9f} GHz\n"
-        f"Resonance : "
-        f"{resonance_frequency:.9f} GHz\n"
-        f"Error     : "
-        f"{error_khz:+.3f} kHz"
+        f"Tuning    : {tuning_index}\n"
+        f"Current   : {current_frequency:.9f} GHz\n"
+        f"Target    : {target_frequency:.9f} GHz\n"
+        f"Resonance : {resonance_frequency:.9f} GHz\n"
+        f"Error     : {error_khz:+.3f} kHz"
     )
 
     plt.text(
@@ -426,9 +424,7 @@ def save_vna_data(
         )
     )
 
-
     # 軸・タイトル
-
     plt.xlabel(
         "Frequency [GHz]"
     )
@@ -438,7 +434,8 @@ def save_vna_data(
     )
 
     plt.title(
-        f"{mode} Frequency Tuning"
+        f"{mode} Frequency Tuning "
+        f"- Tuning {tuning_index}"
     )
 
     plt.grid()
@@ -468,24 +465,10 @@ def save_vna_data(
         f"{image_filename}"
     )
 
-
-    # 次の測定に備える
-
-    for ch in range(1, 5):
-
-        znb.write(
-            f"INITiate{ch}:CONTinuous ON"
-        )
-
-    print(
-        "VNA continuous sweep restarted."
-    )
-
     return (
         summary_filename,
         image_filename
     )
-
 
 
 # Controller本体
@@ -497,7 +480,6 @@ def run_controller(atc):
     print("======================================")
 
     # VNA接続
-
     print(
         "\nConnecting to VNA..."
     )
@@ -524,7 +506,6 @@ def run_controller(atc):
     print(
         "VNA setup completed."
     )
-
 
     # Kafka接続
     print(
@@ -554,7 +535,6 @@ def run_controller(atc):
     )
 
     # 常駐ループ
-
     try:
 
         while True:
@@ -587,9 +567,7 @@ def run_controller(atc):
                         msg.value
                     )
 
-
                     # Command解析
-
                     command = (
                         parse_command(
                             msg.value
@@ -619,7 +597,6 @@ def run_controller(atc):
                     )
 
                     # VNA範囲チェック
-
                     if not check_target_range(
                         mode,
                         target_frequency
@@ -632,9 +609,7 @@ def run_controller(atc):
 
                         continue
 
-
                     # Piezo feedback
-
                     try:
 
                         final_f0 = (
@@ -644,6 +619,7 @@ def run_controller(atc):
                                 target_f0=target_frequency,
                                 mode=mode,
                                 max_iterations=50,
+                                save_callback=save_vna_data,
                             )
                         )
 
@@ -666,15 +642,10 @@ def run_controller(atc):
                         continue
 
                     # 調整失敗
-
                     if final_f0 is None:
 
                         print(
                             "\nFrequency tuning failed."
-                        )
-
-                        print(
-                            "VNA data will NOT be saved."
                         )
 
                         print(
@@ -685,7 +656,6 @@ def run_controller(atc):
                         continue
 
                     # 調整成功
-
                     error_khz = (
                         target_frequency
                         - final_f0
@@ -713,46 +683,8 @@ def run_controller(atc):
                         f"{error_khz:+.3f} kHz"
                     )
 
-
-                    # VNAデータ + PNG保存
-
-                    try:
-
-                        (
-                            summary_filename,
-                            image_filename
-                        ) = save_vna_data(
-                            znb,
-                            mode,
-                            target_frequency
-                        )
-
-                        print(
-                            "\nSaved files:"
-                        )
-
-                        print(
-                            f"CSV : "
-                            f"{summary_filename}"
-                        )
-
-                        print(
-                            f"PNG : "
-                            f"{image_filename}"
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            "\nERROR during "
-                            "VNA data saving:"
-                        )
-
-                        print(
-                            e
-                        )
-
-                    # 次の命令待ち
+                    # 最終Tuningでもすでに保存済みなので
+                    # ここでは追加保存しない
 
                     print(
                         "\nWaiting for next "
