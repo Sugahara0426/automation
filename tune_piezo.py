@@ -31,6 +31,7 @@ def tune_piezo(
     tolerance_khz=50.0,
     max_iterations=50,
     wait_time=0.1,
+    save_callback=None,
 ):
     """
     Piezoを動かして共鳴周波数を目標値に合わせる。
@@ -57,6 +58,9 @@ def tune_piezo(
 
     wait_time : float
         Piezo移動後の待ち時間 [s]
+
+    save_callback :
+        各TuningでVNAデータを保存するための関数
 
     Returns
     -------
@@ -94,6 +98,7 @@ def tune_piezo(
 
     for i in range(1, max_iterations + 1):
 
+
         # 現在の共鳴周波数を取得
         result = vna_tools.find_min_freq(
             znb,
@@ -102,8 +107,8 @@ def tune_piezo(
             threshold=0.5
         )
 
-        # find_min_freq() は失敗時に
-        # (None, None) を返す場合があるため対応
+        # find_min_freq() が失敗時に
+        # (None, None) を返す場合にも対応
         if isinstance(result, tuple):
             f0_hz = result[0]
         else:
@@ -134,6 +139,29 @@ def tune_piezo(
         print(f"Error   : {error_khz:+.3f} kHz")
 
 
+        # 各TuningでVNAデータ + PNGを保存
+        if save_callback is not None:
+
+            try:
+
+                save_callback(
+                    znb=znb,
+                    mode=mode,
+                    target_frequency=target_f0,
+                    tuning_index=i,
+                    current_frequency=f0,
+                )
+
+            except Exception as e:
+
+                # 保存に失敗してもPiezo tuning自体は継続
+                print(
+                    "\nWARNING: VNA data saving failed."
+                )
+
+                print(e)
+
+
         # 許容範囲内なら終了
         if abs(error_khz) <= tolerance_khz:
 
@@ -148,7 +176,7 @@ def tune_piezo(
 
             return f0
 
-
+        
         # 必要step数を計算
         required_steps = (
             error_hz
@@ -177,6 +205,7 @@ def tune_piezo(
             f"Move    : "
             f"{move_steps:+d} steps"
         )
+
 
         # Piezo移動
         atc.move_by_steps(
