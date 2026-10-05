@@ -643,7 +643,6 @@ def run_controller(atc):
                                 znb=znb,
                                 target_f0=target_frequency,
                                 mode=mode,
-                                tolerance_khz=50.0,
                                 max_iterations=50,
                             )
                         )
