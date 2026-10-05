@@ -28,7 +28,7 @@ def tune_piezo(
     znb,
     target_f0,
     mode="TM110",
-    tolerance_khz=1.0,
+    tolerance_khz=50.0,
     max_iterations=50,
     wait_time=0.1,
 ):
