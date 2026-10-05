@@ -3,7 +3,7 @@ import csv
 import os
 
 # ============================================================
-# Slack通知を使うときにコメントアウトを外す
+# Slack通知を使用するときに有効化
 # ============================================================
 
 # import urllib.request
@@ -19,7 +19,9 @@ from tune_piezo import tune_piezo
 
 
 # ============================================================
-# 保存場所をfrequency_controller.pyの場所に固定
+# 保存場所
+#
+# frequency_controller.pyと同じ場所を基準にする
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -30,7 +32,7 @@ os.chdir(BASE_DIR)
 
 
 # ============================================================
-# 基本設定
+# Kafka / VNA設定
 # ============================================================
 
 KAFKA_SERVER = "10.105.52.103:9092"
@@ -44,22 +46,22 @@ VNA_RESOURCE = (
 # ============================================================
 # Slack設定
 #
-# Webhook URLを取得したら以下のコメントアウトを外す
+# Webhook URL取得後にコメントアウトを外す
 # ============================================================
 
 # SLACK_WEBHOOK_URL = (
 #     "https://hooks.slack.com/services/..."
 # )
 
-# 管理用
-# 実際の投稿先チャンネルはWebhook側で決まる
+# 表示用
+# 実際の送信先はWebhookに紐づいたチャンネル
 # SLACK_CHANNEL = "#frequency-tuning"
 
 
 # ============================================================
 # Slack通知
 #
-# Webhook URL取得後にコメントアウトを外して使用
+# Webhook URL取得後にコメントアウトを外す
 # ============================================================
 
 # def notify_slack(message):
@@ -93,11 +95,11 @@ VNA_RESOURCE = (
 #             request,
 #             timeout=5,
 #         ) as response:
-#
 #             response.read()
 #
 #         print(
-#             "Slack notification sent."
+#             f"Slack notification sent "
+#             f"({SLACK_CHANNEL})."
 #         )
 #
 #         return True
@@ -113,11 +115,10 @@ VNA_RESOURCE = (
 
 
 # ============================================================
-# VNA Narrow sweep範囲
+# VNA Narrow sweep範囲 [GHz]
 # ============================================================
 
 VNA_NARROW_RANGE = {
-
     "TM110": {
         "min_ghz": 1.8954,
         "max_ghz": 1.8994,
@@ -139,10 +140,9 @@ def create_consumer():
     return KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers=KAFKA_SERVER,
-        value_deserializer=lambda m:
-            json.loads(
-                m.decode("utf-8")
-            ),
+        value_deserializer=lambda m: json.loads(
+            m.decode("utf-8")
+        ),
         auto_offset_reset="latest",
         enable_auto_commit=True,
     )
@@ -154,84 +154,50 @@ def create_consumer():
 
 def parse_command(message):
 
-    if not isinstance(
-        message,
-        dict
-    ):
-
-        print(
-            "ERROR: message is not dict."
-        )
-
+    if not isinstance(message, dict):
+        print("ERROR: message is not dict.")
         return None
 
     if message.get("command") != "tune":
-
-        print(
-            "Command is not 'tune'."
-        )
-
+        print("Command is not 'tune'.")
         return None
 
-    mode = message.get(
-        "mode"
-    )
-
+    mode = message.get("mode")
     target_frequency = message.get(
         "target_frequency"
     )
 
     if mode is None:
-
-        print(
-            "ERROR: modeがありません。"
-        )
-
+        print("ERROR: modeがありません。")
         return None
 
     if target_frequency is None:
-
         print(
             "ERROR: target_frequencyがありません。"
         )
-
         return None
 
     mode = mode.upper()
 
-    if mode not in (
-        "TM110",
-        "TM210"
-    ):
-
+    if mode not in ("TM110", "TM210"):
         print(
             f"ERROR: Unknown mode: {mode}"
         )
-
         return None
 
     try:
-
         target_frequency = float(
             target_frequency
         )
 
-    except (
-        TypeError,
-        ValueError
-    ):
-
+    except (TypeError, ValueError):
         print(
             "ERROR: target_frequencyを"
             "数値に変換できません。"
         )
-
         return None
 
-    return (
-        mode,
-        target_frequency
-    )
+    return mode, target_frequency
 
 
 # ============================================================
@@ -240,27 +206,15 @@ def parse_command(message):
 
 def check_target_range(
     mode,
-    target_frequency
+    target_frequency,
 ):
 
-    freq_range = (
-        VNA_NARROW_RANGE[mode]
-    )
+    freq_range = VNA_NARROW_RANGE[mode]
 
-    min_freq = (
-        freq_range["min_ghz"]
-    )
+    min_freq = freq_range["min_ghz"]
+    max_freq = freq_range["max_ghz"]
 
-    max_freq = (
-        freq_range["max_ghz"]
-    )
-
-    if (
-        min_freq
-        <= target_frequency
-        <= max_freq
-    ):
-
+    if min_freq <= target_frequency <= max_freq:
         return True
 
     print("\n======================================")
@@ -270,9 +224,7 @@ def check_target_range(
     )
     print("======================================")
 
-    print(
-        f"Mode   : {mode}"
-    )
+    print(f"Mode   : {mode}")
 
     print(
         f"Target : "
@@ -285,19 +237,14 @@ def check_target_range(
         f"{max_freq:.9f} GHz"
     )
 
-    print(
-        "\nCommand rejected."
-    )
-
-    print(
-        "Piezo will not move."
-    )
+    print("\nCommand rejected.")
+    print("Piezo will not move.")
 
     return False
 
 
 # ============================================================
-# VNAデータ保存 + グラフ保存
+# VNAデータ保存 + PNG保存
 # ============================================================
 
 def save_vna_data(
@@ -305,8 +252,17 @@ def save_vna_data(
     mode,
     target_frequency,
     tuning_index,
-    current_frequency
+    current_frequency,
 ):
+    """
+    VNAを10回測定してCSVを保存し、
+    Narrow S11から共鳴周波数を求めてPNGを保存する。
+
+    Returns
+    -------
+    resonance_frequency : float
+        保存したVNAデータから求めた共鳴周波数 [GHz]
+    """
 
     suffix = (
         f"{mode}_"
@@ -324,49 +280,47 @@ def save_vna_data(
         f"Suffix : {suffix}"
     )
 
+    # --------------------------------------------------------
     # VNAデータ保存
+    # --------------------------------------------------------
+
     summary_filename = (
         vna_tools.measure_and_save(
             znb,
-            suffix_arg=suffix
+            suffix_arg=suffix,
         )
     )
 
-    print(
-        "VNA data saved."
-    )
+    print("VNA data saved.")
 
-    # Narrow modeを選択
+    # --------------------------------------------------------
+    # 使用するNarrow mode
+    # --------------------------------------------------------
+
     if mode == "TM110":
-
-        measurement_mode = (
-            "110_Narrow"
-        )
+        measurement_mode = "110_Narrow"
 
     elif mode == "TM210":
-
-        measurement_mode = (
-            "210_Narrow"
-        )
+        measurement_mode = "210_Narrow"
 
     else:
-
         raise ValueError(
             f"Unknown mode: {mode}"
         )
 
-    # CSV読み込み
+    # --------------------------------------------------------
+    # Summary CSV読み込み
+    # --------------------------------------------------------
+
     frequencies = []
     s11_amplitudes = []
 
     with open(
         summary_filename,
-        "r"
+        "r",
     ) as f:
 
-        reader = csv.DictReader(
-            f
-        )
+        reader = csv.DictReader(f)
 
         for row in reader:
 
@@ -374,7 +328,6 @@ def save_vna_data(
                 row["Measurement_Mode"]
                 != measurement_mode
             ):
-
                 continue
 
             frequency_ghz = (
@@ -397,13 +350,15 @@ def save_vna_data(
             )
 
     if not frequencies:
-
         raise RuntimeError(
             f"No data found for "
             f"{measurement_mode}"
         )
 
-    # S11 Amp Meanが最小となる周波数
+    # --------------------------------------------------------
+    # 平均S11が最小になる周波数
+    # --------------------------------------------------------
+
     min_index = (
         s11_amplitudes.index(
             min(s11_amplitudes)
@@ -423,9 +378,7 @@ def save_vna_data(
         - resonance_frequency
     ) * 1e6
 
-    print(
-        "\nSaved VNA resonance:"
-    )
+    print("\nSaved VNA resonance:")
 
     print(
         f"Resonance : "
@@ -443,7 +396,7 @@ def save_vna_data(
     )
 
     # ========================================================
-    # Plot
+    # PNG
     # ========================================================
 
     plt.figure(
@@ -453,7 +406,7 @@ def save_vna_data(
     plt.plot(
         frequencies,
         s11_amplitudes,
-        label="S11"
+        label="S11",
     )
 
     plt.axvline(
@@ -462,7 +415,7 @@ def save_vna_data(
         label=(
             "Target "
             f"{target_frequency:.9f} GHz"
-        )
+        ),
     )
 
     plt.axvline(
@@ -471,18 +424,18 @@ def save_vna_data(
         label=(
             "Resonance "
             f"{resonance_frequency:.9f} GHz"
-        )
+        ),
     )
 
     plt.scatter(
         [resonance_frequency],
         [resonance_amp],
-        zorder=5
+        zorder=5,
     )
 
     info_text = (
         f"Tuning    : {tuning_index}\n"
-        f"Current   : {current_frequency:.9f} GHz\n"
+        f"Pre-save  : {current_frequency:.9f} GHz\n"
         f"Target    : {target_frequency:.9f} GHz\n"
         f"Resonance : {resonance_frequency:.9f} GHz\n"
         f"Error     : {error_khz:+.3f} kHz"
@@ -496,8 +449,8 @@ def save_vna_data(
         verticalalignment="top",
         bbox=dict(
             boxstyle="round",
-            alpha=0.8
-        )
+            alpha=0.8,
+        ),
     )
 
     plt.xlabel(
@@ -517,7 +470,10 @@ def save_vna_data(
     plt.legend()
     plt.tight_layout()
 
+    # --------------------------------------------------------
     # PNG保存
+    # --------------------------------------------------------
+
     image_filename = (
         os.path.splitext(
             summary_filename
@@ -527,7 +483,7 @@ def save_vna_data(
 
     plt.savefig(
         image_filename,
-        dpi=150
+        dpi=150,
     )
 
     plt.close()
@@ -537,14 +493,17 @@ def save_vna_data(
         f"{image_filename}"
     )
 
-    return (
-        summary_filename,
-        image_filename
-    )
+    # ========================================================
+    # 重要
+    #
+    # この値をFeedbackと最終SG周波数に使用する
+    # ========================================================
+
+    return resonance_frequency
 
 
 # ============================================================
-# Controller本体
+# Controller
 # ============================================================
 
 def run_controller(atc):
@@ -553,78 +512,58 @@ def run_controller(atc):
     print("Frequency Controller")
     print("======================================")
 
+    # --------------------------------------------------------
     # VNA接続
-    print(
-        "\nConnecting to VNA..."
-    )
+    # --------------------------------------------------------
+
+    print("\nConnecting to VNA...")
 
     rm = pyvisa.ResourceManager(
         "@py"
     )
 
-    znb = (
-        vna_tools.get_vna_resource(
-            rm,
-            VNA_RESOURCE
-        )
+    znb = vna_tools.get_vna_resource(
+        rm,
+        VNA_RESOURCE,
     )
 
-    print(
-        "Setting up VNA..."
-    )
+    print("Setting up VNA...")
 
     vna_tools.setup_vna(
         znb
     )
 
-    print(
-        "VNA setup completed."
-    )
+    print("VNA setup completed.")
 
-    # Kafka接続
-    print(
-        "\nConnecting to Kafka..."
-    )
+    # --------------------------------------------------------
+    # Kafka
+    # --------------------------------------------------------
 
-    consumer = (
-        create_consumer()
-    )
+    print("\nConnecting to Kafka...")
 
-    print(
-        "Kafka connected."
-    )
+    consumer = create_consumer()
 
-    print(
-        f"Server : "
-        f"{KAFKA_SERVER}"
-    )
-
-    print(
-        f"Topic  : "
-        f"{KAFKA_TOPIC}"
-    )
+    print("Kafka connected.")
+    print(f"Server : {KAFKA_SERVER}")
+    print(f"Topic  : {KAFKA_TOPIC}")
 
     print(
         "\nWaiting for frequency command..."
     )
 
     # ========================================================
-    # Kafka常駐ループ
+    # Kafka常駐
     # ========================================================
 
     try:
 
         while True:
 
-            records = (
-                consumer.poll(
-                    timeout_ms=1000
-                )
+            records = consumer.poll(
+                timeout_ms=1000
             )
 
-            for _, messages in (
-                records.items()
-            ):
+            for _, messages in records.items():
 
                 for msg in messages:
 
@@ -640,29 +579,23 @@ def run_controller(atc):
                         "======================================"
                     )
 
-                    print(
+                    print(msg.value)
+
+                    # ------------------------------------------------
+                    # Command解析
+                    # ------------------------------------------------
+
+                    command = parse_command(
                         msg.value
                     )
 
-                    # Command解析
-                    command = (
-                        parse_command(
-                            msg.value
-                        )
-                    )
-
                     if command is None:
-
-                        print(
-                            "Command skipped."
-                        )
-
+                        print("Command skipped.")
                         continue
 
-                    (
-                        mode,
-                        target_frequency
-                    ) = command
+                    mode, target_frequency = (
+                        command
+                    )
 
                     print(
                         f"\nMode   : {mode}"
@@ -673,10 +606,13 @@ def run_controller(atc):
                         f"{target_frequency:.9f} GHz"
                     )
 
-                    # VNA範囲チェック
+                    # ------------------------------------------------
+                    # VNA範囲確認
+                    # ------------------------------------------------
+
                     if not check_target_range(
                         mode,
-                        target_frequency
+                        target_frequency,
                     ):
 
                         print(
@@ -687,24 +623,24 @@ def run_controller(atc):
                         continue
 
                     # ====================================================
-                    # Piezo feedback
+                    # Piezo Feedback
                     # ====================================================
 
                     try:
 
-                        final_f0 = (
-                            tune_piezo(
-                                atc=atc,
-                                znb=znb,
-                                target_f0=target_frequency,
-                                mode=mode,
-                                max_iterations=50,
-                                save_callback=save_vna_data,
+                        final_f0 = tune_piezo(
+                            atc=atc,
+                            znb=znb,
+                            target_f0=target_frequency,
+                            mode=mode,
+                            tolerance_khz=10.0,
+                            max_iterations=50,
+                            wait_time=1.0,
+                            probe_steps=10,
+                            save_callback=save_vna_data,
 
-                                # Slack通知を使うときに
-                                # コメントアウトを外す
-                                # notify_callback=notify_slack,
-                            )
+                            # Slack使用時に有効化
+                            # notify_callback=notify_slack,
                         )
 
                     except Exception as e:
@@ -716,7 +652,7 @@ def run_controller(atc):
 
                         print(e)
 
-                        # Slack通知を使うときに有効化
+                        # Slack使用時に有効化
                         #
                         # notify_slack(
                         #     (
@@ -754,6 +690,9 @@ def run_controller(atc):
 
                     # ====================================================
                     # 調整成功
+                    #
+                    # final_f0は最後に保存したPNGの
+                    # Resonanceと同じ値
                     # ====================================================
 
                     error_khz = (
@@ -774,14 +713,30 @@ def run_controller(atc):
                     )
 
                     print(
-                        f"Final : "
+                        f"Target          : "
+                        f"{target_frequency:.9f} GHz"
+                    )
+
+                    print(
+                        f"Final resonance : "
                         f"{final_f0:.9f} GHz"
                     )
 
                     print(
-                        f"Error : "
+                        f"Final error     : "
                         f"{error_khz:+.3f} kHz"
                     )
+
+                    print(
+                        f"SG frequency    : "
+                        f"{final_f0:.9f} GHz"
+                    )
+
+                    # ------------------------------------------------
+                    # 将来ここでSGへfinal_f0を設定する
+                    # ------------------------------------------------
+                    #
+                    # set_sg_frequency(final_f0)
 
                     print(
                         "\nWaiting for next "
@@ -803,12 +758,9 @@ def run_controller(atc):
 
         consumer.close()
 
-        print(
-            "Closing VNA..."
-        )
+        print("Closing VNA...")
 
         znb.close()
-
         rm.close()
 
 
@@ -822,17 +774,11 @@ if __name__ == "__main__":
     print("Starting Frequency Controller")
     print("======================================")
 
-    print(
-        "\nConnecting to ANC350..."
-    )
+    print("\nConnecting to ANC350...")
 
-    atc = (
-        Attocube.ANC350()
-    )
+    atc = Attocube.ANC350()
 
-    print(
-        "ANC350 connected."
-    )
+    print("ANC350 connected.")
 
     try:
 
@@ -842,15 +788,11 @@ if __name__ == "__main__":
 
     finally:
 
-        print(
-            "\nClosing ANC350..."
-        )
+        print("\nClosing ANC350...")
 
         atc.close()
 
-        print(
-            "ANC350 closed."
-        )
+        print("ANC350 closed.")
 
         print(
             "Frequency Controller shutdown."
