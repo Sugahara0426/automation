@@ -53,7 +53,7 @@ def return_to_initial_position(
     axis,
     initial_position,
     position_tolerance=0.0005,
-    wait_time=0.1,
+    wait_time=1.0,
 ):
     """
     Piezoを初期位置へ戻し、
@@ -252,9 +252,9 @@ def tune_piezo(
     znb,
     target_f0,
     mode="TM110",
-    tolerance_khz=50.0,
-    max_iterations=50,
-    wait_time=0.1,
+    tolerance_khz=10.0,
+    max_iterations=5,
+    wait_time=1.0,
     probe_steps=10,
     position_tolerance=0.0005,
     save_callback=None,
