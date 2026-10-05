@@ -7,13 +7,14 @@ MODE_CONFIG = {
         "axis": 1,
         "ch": 2,
         "trace": "Trc4",
-        "initial_position": None,  # 決まったら入力
+        "initial_position": None,  # 初期位置が決まったら入力
     },
+
     "TM210": {
         "axis": 2,
         "ch": 4,
         "trace": "Trc9",
-        "initial_position": None,  # 決まったら入力
+        "initial_position": None,  # 初期位置が決まったら入力
     },
 }
 
@@ -35,13 +36,14 @@ def get_resonance_frequency(znb, ch, trace):
 
 
 def notify(notify_callback, message):
-    """通知関数が指定されていれば通知する。"""
+    """通知関数が設定されている場合だけ通知する。"""
 
     if notify_callback is None:
         return
 
     try:
         notify_callback(message)
+
     except Exception as e:
         print(f"WARNING: Notification failed: {e}")
 
@@ -54,7 +56,8 @@ def return_to_initial_position(
     wait_time=0.1,
 ):
     """
-    Piezoを初期位置へ戻し、get_position()で復帰確認する。
+    Piezoを初期位置へ戻し、
+    get_position()で復帰確認する。
 
     Returns
     -------
@@ -68,7 +71,8 @@ def return_to_initial_position(
     print("================================")
 
     if initial_position is None:
-        print("ERROR: Initial position is not defined.")
+        print("WARNING: Initial position is not defined.")
+        print("Piezo was NOT moved.")
         return False
 
     print(f"Axis            : {axis}")
@@ -79,12 +83,12 @@ def return_to_initial_position(
         time.sleep(wait_time)
 
         current_position = atc.get_position(axis)
-
-        print(f"Current position: {current_position}")
-
         position_error = abs(
             current_position - initial_position
         )
+
+        print(f"Current position: {current_position}")
+        print(f"Position error  : {position_error}")
 
         if position_error <= position_tolerance:
             print("Piezo returned to initial position.")
@@ -93,9 +97,6 @@ def return_to_initial_position(
         print(
             "ERROR: Piezo did not reach "
             "the initial position."
-        )
-        print(
-            f"Position error: {position_error}"
         )
 
         return False
@@ -106,10 +107,11 @@ def return_to_initial_position(
             "to initial position."
         )
         print(e)
+
         return False
 
 
-def recover_and_notify(
+def handle_failure(
     atc,
     axis,
     initial_position,
@@ -120,11 +122,15 @@ def recover_and_notify(
     wait_time,
 ):
     """
-    異常通知を送り、初期位置へ戻す。
-    復帰に失敗した場合は追加通知する。
+    異常を表示・通知し、
+    Piezoを初期位置へ戻す。
     """
 
-    print(f"\nERROR: {reason}")
+    print("\n================================")
+    print("Frequency Tuning Failed")
+    print("================================")
+    print(f"Mode   : {mode}")
+    print(f"Reason : {reason}")
 
     notify(
         notify_callback,
@@ -143,12 +149,28 @@ def recover_and_notify(
         wait_time=wait_time,
     )
 
-    if not recovered:
+    if recovered:
+
+        notify(
+            notify_callback,
+            (
+                f"ℹ️ {mode} Piezo Recovery Completed\n"
+                f"Piezo returned to the initial position."
+            ),
+        )
+
+    else:
+
+        print(
+            "WARNING: Piezo recovery failed. "
+            "Manual check may be required."
+        )
+
         notify(
             notify_callback,
             (
                 f"🚨 {mode} Piezo Recovery Failed\n"
-                f"Could not return to initial position.\n"
+                f"Could not return to the initial position.\n"
                 f"Manual check required."
             ),
         )
@@ -164,22 +186,29 @@ def choose_feedback_slope(
     """
     目標方向へ動ける傾きを選択する。
 
+    +step方向なら slope_plus、
+    -step方向なら slope_minus を使用する。
+
     Returns
     -------
     tuple
-        (slope, required_steps)
+        slope, required_steps
 
         使用可能な方向がない場合：
-        (None, None)
+        None, None
     """
 
     candidates = []
 
     # +step方向
     if slope_plus != 0:
-        required_plus = error_hz / slope_plus
+
+        required_plus = (
+            error_hz / slope_plus
+        )
 
         if required_plus > 0:
+
             candidates.append(
                 (
                     abs(required_plus),
@@ -190,9 +219,13 @@ def choose_feedback_slope(
 
     # -step方向
     if slope_minus != 0:
-        required_minus = error_hz / slope_minus
+
+        required_minus = (
+            error_hz / slope_minus
+        )
 
         if required_minus < 0:
+
             candidates.append(
                 (
                     abs(required_minus),
@@ -204,7 +237,8 @@ def choose_feedback_slope(
     if not candidates:
         return None, None
 
-    # 必要step数が少ない方を採用
+    # 両方向が使える場合は
+    # 必要step数が少ない方を選択
     _, slope, required_steps = min(
         candidates,
         key=lambda x: x[0],
@@ -229,12 +263,17 @@ def tune_piezo(
     """
     Piezoを動かして共鳴周波数を目標値に合わせる。
 
+    流れ
+    ----
     1. 現在の共鳴周波数を確認
-    2. 共鳴が見つからなければ初期位置へ復帰
-    3. +10 step と -10 step で正負方向の傾きを測定
-    4. 測定した傾きを使ってFeedback
-    5. 各TuningでVNAデータ・PNGを保存
-    6. 異常時はSlack通知し初期位置へ復帰
+    2. 見つからなければ初期位置へ戻して再確認
+    3. +10 stepして共鳴周波数を測定
+    4. そこから-10 stepして共鳴周波数を測定
+    5. 正方向・負方向それぞれの傾きを計算
+    6. その傾きを使ってFeedback
+    7. 各TuningでVNAデータ + PNG保存
+    8. 異常時は初期位置へ戻して終了
+    9. 成功・失敗時に通知可能
     """
 
     mode = mode.upper()
@@ -262,7 +301,7 @@ def tune_piezo(
     print(f"Max iterations : {max_iterations}")
 
     # ========================================================
-    # 初期共鳴周波数
+    # 最初の共鳴周波数を確認
     # ========================================================
 
     f_start_hz = get_resonance_frequency(
@@ -271,7 +310,7 @@ def tune_piezo(
         trace,
     )
 
-    # 最初から共鳴が見つからなければ初期位置へ戻す
+    # 最初から共鳴が見つからない場合
     if f_start_hz is None:
 
         print(
@@ -287,18 +326,20 @@ def tune_piezo(
         )
 
         if not recovered:
+
             notify(
                 notify_callback,
                 (
-                    f"🚨 {mode} Initial Recovery Failed\n"
+                    f"🚨 {mode} Frequency Tuning Failed\n"
                     f"Initial resonance was not found and "
-                    f"Piezo could not return to initial position.\n"
+                    f"Piezo recovery failed.\n"
                     f"Manual check required."
                 ),
             )
+
             return None
 
-        # 初期位置で再測定
+        # 初期位置で再確認
         f_start_hz = get_resonance_frequency(
             znb,
             ch,
@@ -306,6 +347,12 @@ def tune_piezo(
         )
 
         if f_start_hz is None:
+
+            print(
+                "ERROR: Resonance was not found "
+                "even at the initial position."
+            )
+
             notify(
                 notify_callback,
                 (
@@ -314,10 +361,11 @@ def tune_piezo(
                     f"returning to the initial position."
                 ),
             )
+
             return None
 
     # ========================================================
-    # +10 step方向の傾き
+    # +step方向の傾きを取得
     # ========================================================
 
     print("\n================================")
@@ -325,11 +373,13 @@ def tune_piezo(
     print("================================")
 
     print(
-        f"Start  : {f_start_hz / 1e9:.9f} GHz"
+        f"Start       : "
+        f"{f_start_hz / 1e9:.9f} GHz"
     )
 
     print(
-        f"Move   : +{probe_steps} steps"
+        f"Move        : "
+        f"+{probe_steps} steps"
     )
 
     atc.move_by_steps(
@@ -347,16 +397,21 @@ def tune_piezo(
     )
 
     if f_plus_hz is None:
-        recover_and_notify(
+
+        handle_failure(
             atc=atc,
             axis=axis,
             initial_position=initial_position,
             mode=mode,
-            reason="Resonance lost during +step slope measurement.",
+            reason=(
+                "Resonance lost during "
+                "+step slope measurement."
+            ),
             notify_callback=notify_callback,
             position_tolerance=position_tolerance,
             wait_time=wait_time,
         )
+
         return None
 
     slope_plus = (
@@ -364,21 +419,22 @@ def tune_piezo(
     ) / probe_steps
 
     print(
-        f"After +{probe_steps}: "
+        f"After +{probe_steps:<3}: "
         f"{f_plus_hz / 1e9:.9f} GHz"
     )
 
     print(
-        f"Slope + : "
+        f"Slope +     : "
         f"{slope_plus:+.3f} Hz/step"
     )
 
     # ========================================================
-    # そこから -10 step方向の傾き
+    # そこから-step方向の傾きを取得
     # ========================================================
 
     print(
-        f"\nMove   : -{probe_steps} steps"
+        f"\nMove        : "
+        f"-{probe_steps} steps"
     )
 
     atc.move_by_steps(
@@ -396,16 +452,21 @@ def tune_piezo(
     )
 
     if f_minus_hz is None:
-        recover_and_notify(
+
+        handle_failure(
             atc=atc,
             axis=axis,
             initial_position=initial_position,
             mode=mode,
-            reason="Resonance lost during -step slope measurement.",
+            reason=(
+                "Resonance lost during "
+                "-step slope measurement."
+            ),
             notify_callback=notify_callback,
             position_tolerance=position_tolerance,
             wait_time=wait_time,
         )
+
         return None
 
     slope_minus = (
@@ -413,19 +474,25 @@ def tune_piezo(
     ) / (-probe_steps)
 
     print(
-        f"After -{probe_steps}: "
+        f"After -{probe_steps:<3}: "
         f"{f_minus_hz / 1e9:.9f} GHz"
     )
 
     print(
-        f"Slope - : "
+        f"Slope -     : "
         f"{slope_minus:+.3f} Hz/step"
     )
 
-    # 傾きがほぼ0ならFeedbackに使えない
-    if abs(slope_plus) < 1.0 or abs(slope_minus) < 1.0:
+    # ========================================================
+    # 傾きが小さすぎる場合
+    # ========================================================
 
-        recover_and_notify(
+    if (
+        abs(slope_plus) < 1.0
+        or abs(slope_minus) < 1.0
+    ):
+
+        handle_failure(
             atc=atc,
             axis=axis,
             initial_position=initial_position,
@@ -442,7 +509,19 @@ def tune_piezo(
 
         return None
 
-    # -10後の位置をFeedback開始位置として使う
+    print("\n================================")
+    print("Slope measurement finished")
+    print("================================")
+    print(
+        f"Slope + : "
+        f"{slope_plus:+.3f} Hz/step"
+    )
+    print(
+        f"Slope - : "
+        f"{slope_minus:+.3f} Hz/step"
+    )
+
+    # -10 step後の位置からFeedback開始
     f0_hz = f_minus_hz
 
     # ========================================================
@@ -454,8 +533,9 @@ def tune_piezo(
         max_iterations + 1,
     ):
 
-        # Tuning 2以降は再測定
+        # Tuning 2以降はVNAで再測定
         if i > 1:
+
             f0_hz = get_resonance_frequency(
                 znb,
                 ch,
@@ -463,12 +543,15 @@ def tune_piezo(
             )
 
             if f0_hz is None:
-                recover_and_notify(
+
+                handle_failure(
                     atc=atc,
                     axis=axis,
                     initial_position=initial_position,
                     mode=mode,
-                    reason="Resonance lost during feedback.",
+                    reason=(
+                        "Resonance lost during feedback."
+                    ),
                     notify_callback=notify_callback,
                     position_tolerance=position_tolerance,
                     wait_time=wait_time,
@@ -476,7 +559,13 @@ def tune_piezo(
 
                 return None
 
-        f0 = f0_hz / 1e9
+        # ====================================================
+        # 誤差計算
+        # ====================================================
+
+        f0 = (
+            f0_hz / 1e9
+        )
 
         error_hz = (
             target_f0 * 1e9
@@ -487,10 +576,24 @@ def tune_piezo(
             error_hz / 1e3
         )
 
-        print(f"\n--- Tuning {i} ---")
-        print(f"Current : {f0:.9f} GHz")
-        print(f"Target  : {target_f0:.9f} GHz")
-        print(f"Error   : {error_khz:+.3f} kHz")
+        print(
+            f"\n--- Tuning {i} ---"
+        )
+
+        print(
+            f"Current : "
+            f"{f0:.9f} GHz"
+        )
+
+        print(
+            f"Target  : "
+            f"{target_f0:.9f} GHz"
+        )
+
+        print(
+            f"Error   : "
+            f"{error_khz:+.3f} kHz"
+        )
 
         # ====================================================
         # 各TuningでCSV + PNG保存
@@ -499,6 +602,7 @@ def tune_piezo(
         if save_callback is not None:
 
             try:
+
                 save_callback(
                     znb=znb,
                     mode=mode,
@@ -508,13 +612,16 @@ def tune_piezo(
                 )
 
             except Exception as e:
+
                 print(
-                    "\nWARNING: VNA data saving failed."
+                    "\nWARNING: "
+                    "VNA data saving failed."
                 )
+
                 print(e)
 
         # ====================================================
-        # 完了判定
+        # 調整完了
         # ====================================================
 
         if abs(error_khz) <= tolerance_khz:
@@ -541,7 +648,7 @@ def tune_piezo(
             return f0
 
         # ====================================================
-        # 動かす方向に応じた傾きを選ぶ
+        # 使用する傾きとstep数を決定
         # ====================================================
 
         slope, required_steps = (
@@ -554,7 +661,7 @@ def tune_piezo(
 
         if slope is None:
 
-            recover_and_notify(
+            handle_failure(
                 atc=atc,
                 axis=axis,
                 initial_position=initial_position,
@@ -577,6 +684,7 @@ def tune_piezo(
         )
 
         if move_steps == 0:
+
             move_steps = (
                 1
                 if required_steps > 0
@@ -598,6 +706,10 @@ def tune_piezo(
             f"{move_steps:+d} steps"
         )
 
+        # ====================================================
+        # Piezo移動
+        # ====================================================
+
         atc.move_by_steps(
             axis,
             move_steps,
@@ -607,10 +719,10 @@ def tune_piezo(
         time.sleep(wait_time)
 
     # ========================================================
-    # 最大回数
+    # 最大回数まで到達
     # ========================================================
 
-    recover_and_notify(
+    handle_failure(
         atc=atc,
         axis=axis,
         initial_position=initial_position,
