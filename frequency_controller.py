@@ -2,6 +2,12 @@ import json
 import csv
 import os
 
+# ============================================================
+# Slack通知を使うときにコメントアウトを外す
+# ============================================================
+
+# import urllib.request
+
 import pyvisa
 import matplotlib.pyplot as plt
 
@@ -12,7 +18,10 @@ import vna_tools
 from tune_piezo import tune_piezo
 
 
+# ============================================================
 # 保存場所をfrequency_controller.pyの場所に固定
+# ============================================================
+
 BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
 )
@@ -20,7 +29,9 @@ BASE_DIR = os.path.dirname(
 os.chdir(BASE_DIR)
 
 
+# ============================================================
 # 基本設定
+# ============================================================
 
 KAFKA_SERVER = "10.105.52.103:9092"
 KAFKA_TOPIC = "frequency_control"
@@ -30,7 +41,80 @@ VNA_RESOURCE = (
 )
 
 
+# ============================================================
+# Slack設定
+#
+# Webhook URLを取得したら以下のコメントアウトを外す
+# ============================================================
+
+# SLACK_WEBHOOK_URL = (
+#     "https://hooks.slack.com/services/..."
+# )
+
+# 管理用
+# 実際の投稿先チャンネルはWebhook側で決まる
+# SLACK_CHANNEL = "#frequency-tuning"
+
+
+# ============================================================
+# Slack通知
+#
+# Webhook URL取得後にコメントアウトを外して使用
+# ============================================================
+
+# def notify_slack(message):
+#     """Slack Incoming Webhookへ通知する。"""
+#
+#     if not SLACK_WEBHOOK_URL:
+#         print(
+#             "WARNING: Slack Webhook URL "
+#             "is not configured."
+#         )
+#         return False
+#
+#     payload = json.dumps(
+#         {
+#             "text": message
+#         }
+#     ).encode("utf-8")
+#
+#     request = urllib.request.Request(
+#         SLACK_WEBHOOK_URL,
+#         data=payload,
+#         headers={
+#             "Content-Type": "application/json"
+#         },
+#         method="POST",
+#     )
+#
+#     try:
+#
+#         with urllib.request.urlopen(
+#             request,
+#             timeout=5,
+#         ) as response:
+#
+#             response.read()
+#
+#         print(
+#             "Slack notification sent."
+#         )
+#
+#         return True
+#
+#     except Exception as e:
+#
+#         print(
+#             f"WARNING: "
+#             f"Slack notification failed: {e}"
+#         )
+#
+#         return False
+
+
+# ============================================================
 # VNA Narrow sweep範囲
+# ============================================================
 
 VNA_NARROW_RANGE = {
 
@@ -46,29 +130,27 @@ VNA_NARROW_RANGE = {
 }
 
 
-
+# ============================================================
 # Kafka Consumer
+# ============================================================
 
 def create_consumer():
 
     return KafkaConsumer(
-
         KAFKA_TOPIC,
-
         bootstrap_servers=KAFKA_SERVER,
-
         value_deserializer=lambda m:
             json.loads(
                 m.decode("utf-8")
             ),
-
         auto_offset_reset="latest",
-
         enable_auto_commit=True,
     )
 
 
+# ============================================================
 # Kafka message解析
+# ============================================================
 
 def parse_command(message):
 
@@ -152,8 +234,9 @@ def parse_command(message):
     )
 
 
-
+# ============================================================
 # VNA範囲チェック
+# ============================================================
 
 def check_target_range(
     mode,
@@ -213,8 +296,9 @@ def check_target_range(
     return False
 
 
-
+# ============================================================
 # VNAデータ保存 + グラフ保存
+# ============================================================
 
 def save_vna_data(
     znb,
@@ -312,7 +396,6 @@ def save_vna_data(
                 s11_amp
             )
 
-    # データが取得できたか確認
     if not frequencies:
 
         raise RuntimeError(
@@ -320,7 +403,6 @@ def save_vna_data(
             f"{measurement_mode}"
         )
 
-    # 保存データから共鳴周波数を算出
     # S11 Amp Meanが最小となる周波数
     min_index = (
         s11_amplitudes.index(
@@ -336,8 +418,6 @@ def save_vna_data(
         s11_amplitudes[min_index]
     )
 
-    # tune_piezo側と同じく
-    # Error = Target - Resonance とする
     error_khz = (
         target_frequency
         - resonance_frequency
@@ -362,21 +442,20 @@ def save_vna_data(
         f"{error_khz:+.3f} kHz"
     )
 
-
+    # ========================================================
     # Plot
+    # ========================================================
 
     plt.figure(
         figsize=(8, 6)
     )
 
-    # S11
     plt.plot(
         frequencies,
         s11_amplitudes,
         label="S11"
     )
 
-    # Target周波数
     plt.axvline(
         target_frequency,
         linestyle="--",
@@ -386,7 +465,6 @@ def save_vna_data(
         )
     )
 
-    # Resonance周波数
     plt.axvline(
         resonance_frequency,
         linestyle=":",
@@ -396,14 +474,12 @@ def save_vna_data(
         )
     )
 
-    # 共鳴点
     plt.scatter(
         [resonance_frequency],
         [resonance_amp],
         zorder=5
     )
 
-    # 周波数情報を画像内に表示
     info_text = (
         f"Tuning    : {tuning_index}\n"
         f"Current   : {current_frequency:.9f} GHz\n"
@@ -424,7 +500,6 @@ def save_vna_data(
         )
     )
 
-    # 軸・タイトル
     plt.xlabel(
         "Frequency [GHz]"
     )
@@ -439,13 +514,10 @@ def save_vna_data(
     )
 
     plt.grid()
-
     plt.legend()
-
     plt.tight_layout()
 
     # PNG保存
-
     image_filename = (
         os.path.splitext(
             summary_filename
@@ -471,7 +543,9 @@ def save_vna_data(
     )
 
 
+# ============================================================
 # Controller本体
+# ============================================================
 
 def run_controller(atc):
 
@@ -534,7 +608,10 @@ def run_controller(atc):
         "\nWaiting for frequency command..."
     )
 
-    # 常駐ループ
+    # ========================================================
+    # Kafka常駐ループ
+    # ========================================================
+
     try:
 
         while True:
@@ -609,7 +686,10 @@ def run_controller(atc):
 
                         continue
 
+                    # ====================================================
                     # Piezo feedback
+                    # ====================================================
+
                     try:
 
                         final_f0 = (
@@ -620,6 +700,10 @@ def run_controller(atc):
                                 mode=mode,
                                 max_iterations=50,
                                 save_callback=save_vna_data,
+
+                                # Slack通知を使うときに
+                                # コメントアウトを外す
+                                # notify_callback=notify_slack,
                             )
                         )
 
@@ -630,9 +714,19 @@ def run_controller(atc):
                             "frequency tuning:"
                         )
 
-                        print(
-                            e
-                        )
+                        print(e)
+
+                        # Slack通知を使うときに有効化
+                        #
+                        # notify_slack(
+                        #     (
+                        #         f"🚨 {mode} "
+                        #         f"Frequency Controller Error\n"
+                        #         f"Target: "
+                        #         f"{target_frequency:.9f} GHz\n"
+                        #         f"Error: {e}"
+                        #     )
+                        # )
 
                         print(
                             "\nWaiting for next "
@@ -641,7 +735,10 @@ def run_controller(atc):
 
                         continue
 
+                    # ====================================================
                     # 調整失敗
+                    # ====================================================
+
                     if final_f0 is None:
 
                         print(
@@ -655,7 +752,10 @@ def run_controller(atc):
 
                         continue
 
+                    # ====================================================
                     # 調整成功
+                    # ====================================================
+
                     error_khz = (
                         target_frequency
                         - final_f0
@@ -682,9 +782,6 @@ def run_controller(atc):
                         f"Error : "
                         f"{error_khz:+.3f} kHz"
                     )
-
-                    # 最終Tuningでもすでに保存済みなので
-                    # ここでは追加保存しない
 
                     print(
                         "\nWaiting for next "
@@ -715,7 +812,9 @@ def run_controller(atc):
         rm.close()
 
 
+# ============================================================
 # Main
+# ============================================================
 
 if __name__ == "__main__":
 
