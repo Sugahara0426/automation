@@ -44,35 +44,52 @@ class FrequencyCommandProducer:
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
         )
 
-    def send_target(self, mode, target_frequency_khz):
-
+    def send_target(
+        self,
+        mode,
+        target_frequency_khz,
+    ):
         # Mode確認
         mode = mode.upper()
 
         if mode not in ("TM110", "TM210"):
-            raise ValueError(f"Unknown mode: {mode}")
+            raise ValueError(
+                f"Unknown mode: {mode}"
+            )
 
-        # 入力値をfloatへ変換
+        # 入力値をfloatに変換
         try:
-            target_frequency_khz = float(target_frequency_khz)
+            target_frequency_khz = float(
+                target_frequency_khz
+            )
+
         except (TypeError, ValueError):
             raise ValueError(
                 "target_frequency_khz must be a number."
             )
 
+        # ====================================================
         # kHz → GHz
-        target_frequency = target_frequency_khz / 1e6
+        # ====================================================
 
-        # --------------------------------------------------------
+        target_frequency = (
+            target_frequency_khz / 1e6
+        )
+
+        # ====================================================
         # VNA範囲チェック
-        # --------------------------------------------------------
+        # ====================================================
 
         freq_range = VNA_NARROW_RANGE[mode]
 
         min_freq = freq_range["min_ghz"]
         max_freq = freq_range["max_ghz"]
 
-        if not (min_freq <= target_frequency <= max_freq):
+        if not (
+            min_freq
+            <= target_frequency
+            <= max_freq
+        ):
             raise ValueError(
                 "\nTarget frequency is outside VNA range.\n"
                 f"Mode   : {mode}\n"
@@ -84,11 +101,11 @@ class FrequencyCommandProducer:
                 "Kafka message was NOT sent."
             )
 
-        # --------------------------------------------------------
+        # ====================================================
         # Kafka message
         #
-        # ControllerにはGHzで渡す
-        # --------------------------------------------------------
+        # ControllerにはGHzで送る
+        # ====================================================
 
         message = {
             "command": "tune",
@@ -96,19 +113,37 @@ class FrequencyCommandProducer:
             "target_frequency": target_frequency,
         }
 
-        print("\nSending frequency command:")
-        print(f"Mode   : {mode}")
-        print(f"Target : {target_frequency_khz:.3f} kHz")
-        print(f"       = {target_frequency:.9f} GHz")
+        print(
+            "\nSending frequency command:"
+        )
 
+        print(
+            f"Mode   : {mode}"
+        )
+
+        print(
+            f"Target : "
+            f"{target_frequency_khz:.3f} kHz"
+        )
+
+        print(
+            f"       = "
+            f"{target_frequency:.9f} GHz"
+        )
+
+        # Kafkaへ送信
         future = self.producer.send(
             self.kafka_topic,
             value=message,
         )
 
-        future.get(timeout=10)
+        future.get(
+            timeout=10
+        )
 
-        print("Frequency command sent.")
+        print(
+            "Frequency command sent."
+        )
 
     def close(self):
         self.producer.flush()
@@ -130,7 +165,4 @@ if __name__ == "__main__":
         )
 
     finally:
-        producer.close()
-    finally:
-
         producer.close()
