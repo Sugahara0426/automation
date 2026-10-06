@@ -27,6 +27,8 @@
 # ============================================================
 
 import json
+import logging
+from pathlib import Path
 import time
 import queue
 import threading
@@ -136,7 +138,23 @@ class PowerFeedbackController:
         interval=DEFAULT_INTERVAL,
         target_power_w=DEFAULT_TARGET_POWER_W,
         filter_window=DEFAULT_FILTER_WINDOW,
+        log_path=None,
+        console_output=False,
     ):
+
+        # Measurement logs go to a file so the interactive prompt stays usable.
+        self.console_output = bool(console_output)
+        if log_path is None:
+            log_path = Path(__file__).resolve().parent / "logs" / (
+                f"power_feedback_{time.time_ns()}.log"
+            )
+        self.log_path = str(Path(log_path).expanduser().resolve())
+        Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
+        self._measurement_logger = logging.Logger("PowerFeedback.measurements")
+        handler = logging.FileHandler(self.log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+        self._measurement_logger.addHandler(handler)
+        self._measurement_logger.setLevel(logging.INFO)
 
         # ----------------------------------------------------
         # Feedback parameters
@@ -380,7 +398,7 @@ class PowerFeedbackController:
                 continue
 
             if measured_raw is None or measured_raw < POWER_TOO_LOW_W:
-                print("[PowerFeedback] Power too low or missing")
+                self._measurement_logger.warning("Power too low or missing")
                 continue
 
             with self.lock:
@@ -420,13 +438,16 @@ class PowerFeedbackController:
                 self.measured_power_raw_w = measured_raw
                 self.measured_power_filtered_w = measured_filtered
 
-            print(
+            message = (
                 "[PowerFeedback] "
                 f"Raw={measured_raw:.3e} W | "
                 f"Filtered={measured_filtered:.3e} W | "
                 f"Target={target_power:.3e} W | "
                 f"SG={new_sg_power_dbm:.3f} dBm"
             )
+            self._measurement_logger.info(message)
+            if self.console_output:
+                print(message)
 
             time.sleep(interval)
 
@@ -583,6 +604,7 @@ class PowerFeedbackController:
         )
 
 
+        print(f"[PowerFeedback] Measurement log: {self.log_path}")
         self.kafka_thread.start()
         self.feedback_thread.start()
 
@@ -675,6 +697,8 @@ class PowerFeedbackController:
         with self.lock:
 
             return {
+
+                "log_path": self.log_path,
 
                 "rf_on":
                     self.rf_on,
