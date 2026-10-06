@@ -62,8 +62,9 @@ POWER_CHANNEL = "CH2"
 # Feedback default parameters
 # ============================================================
 
-DEFAULT_KP = 330000.0
-DEFAULT_KI = 150.0
+# Conservative starting gains: PID output is added to SG power in watts.
+DEFAULT_KP = 1.0
+DEFAULT_KI = 0.0
 DEFAULT_KD = 0.0
 
 DEFAULT_INTERVAL = 1.0
@@ -79,8 +80,8 @@ POWER_TOO_LOW_W = 1e-12
 # SG power limits
 # ============================================================
 
-SG_MIN_POWER_DBM = -50.0
-SG_MAX_POWER_DBM = 5.0
+SG_MIN_POWER_DBM = -25.0
+SG_MAX_POWER_DBM = -6.0
 
 
 # ============================================================
