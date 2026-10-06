@@ -1,6 +1,5 @@
 # ============================================================
 # power_feedback.py
-#
 # Microwave Power Feedback Controller
 #
 # Power data:
