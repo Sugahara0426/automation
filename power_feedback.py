@@ -3,18 +3,27 @@
 #
 # Microwave Power Feedback Controller
 #
-# Power measurement:
-#   NRP2 -> RaS_NRP2_Operator -> Kafka -> this module
+# Power data:
+#   NRP2
+#     -> RaS_NRP2.py
+#     -> RaS_NRP2_Operator.py
+#     -> Kafka "testdb"
+#     -> this module
 #
-# Control:
-#   start()
-#       -> SG frequency / initial power setting
-#       -> RF ON
-#       -> power feedback start
+# Usage:
 #
-#   stop()
-#       -> feedback stop
-#       -> RF OFF
+#   from power_feedback import PowerFeedbackController
+#
+#   feedback = PowerFeedbackController()
+#
+#   feedback.start(
+#       frequency_ghz=1.8974,
+#       target_power_w=7e-6,
+#       initial_sg_power_dbm=-30.0
+#   )
+#
+#   feedback.stop()
+#
 # ============================================================
 
 import json
@@ -31,19 +40,26 @@ from RaS_SMB_100A import RaS_SMB_100A
 
 
 # ============================================================
-# Device / Kafka settings
+# Device settings
 # ============================================================
 
 SG_IP = "192.168.12.229"
 
+
+# ============================================================
+# Kafka settings
+# ============================================================
+
 KAFKA_SERVER = "10.105.52.103:9092"
 KAFKA_TOPIC = "testdb"
 
+POWER_DEVICE = "RaS_NRP2"
+POWER_DATA_TYPE = "microwave_power"
 POWER_CHANNEL = "CH2"
 
 
 # ============================================================
-# Default feedback settings
+# Feedback default parameters
 # ============================================================
 
 DEFAULT_KP = 330000.0
@@ -54,12 +70,12 @@ DEFAULT_INTERVAL = 1.0
 DEFAULT_TARGET_POWER_W = 7e-6
 DEFAULT_FILTER_WINDOW = 1
 
-# 積分項に使う時間幅
+# 積分項は直近10秒分
 INTEGRAL_WINDOW_TIME = 10.0
 
 
 # ============================================================
-# SG safety limits
+# SG power limits
 # ============================================================
 
 SG_MIN_POWER_DBM = -50.0
@@ -71,10 +87,16 @@ SG_MAX_POWER_DBM = 5.0
 # ============================================================
 
 def dbm_to_w(dbm):
+    """
+    dBm -> W
+    """
     return (10.0 ** (dbm / 10.0)) * 1e-3
 
 
 def w_to_dbm(watt):
+    """
+    W -> dBm
+    """
 
     if watt <= 0:
         return SG_MIN_POWER_DBM
@@ -83,7 +105,7 @@ def w_to_dbm(watt):
 
 
 # ============================================================
-# Controller
+# Power Feedback Controller
 # ============================================================
 
 class PowerFeedbackController:
@@ -98,9 +120,9 @@ class PowerFeedbackController:
         filter_window=DEFAULT_FILTER_WINDOW,
     ):
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # Feedback parameters
-        # ----------------------------------------
+        # ----------------------------------------------------
 
         self.kp = float(kp)
         self.ki = float(ki)
@@ -110,48 +132,63 @@ class PowerFeedbackController:
         self.target_power_w = float(target_power_w)
         self.filter_window = int(filter_window)
 
-        # ----------------------------------------
-        # Current states
-        # ----------------------------------------
+
+        # ----------------------------------------------------
+        # Current SG state
+        # ----------------------------------------------------
 
         self.frequency_ghz = None
 
         self.initial_sg_power_dbm = None
         self.current_sg_power_dbm = None
 
+
+        # ----------------------------------------------------
+        # Current measured power
+        # ----------------------------------------------------
+
         self.measured_power_raw_w = None
         self.measured_power_filtered_w = None
+
+
+        # ----------------------------------------------------
+        # State
+        # ----------------------------------------------------
 
         self.rf_on = False
         self.feedback_on = False
 
-        # ----------------------------------------
-        # Threads
-        # ----------------------------------------
+
+        # ----------------------------------------------------
+        # Thread control
+        # ----------------------------------------------------
 
         self.stop_event = threading.Event()
 
         self.kafka_thread = None
         self.feedback_thread = None
 
-        # Kafka -> feedback loop
+
+        # Kafka -> Feedback data
         self.power_queue = queue.Queue()
 
-        # ----------------------------------------
-        # Devices
-        # ----------------------------------------
+
+        # ----------------------------------------------------
+        # SG connection
+        # ----------------------------------------------------
 
         self.sg = RaS_SMB_100A(SG_IP)
 
-        # ----------------------------------------
-        # State lock
-        # ----------------------------------------
+
+        # ----------------------------------------------------
+        # Thread lock
+        # ----------------------------------------------------
 
         self.lock = threading.Lock()
 
 
     # ========================================================
-    # Settings
+    # Parameter settings
     # ========================================================
 
     def set_pid(self, kp=None, ki=None, kd=None):
@@ -173,7 +210,7 @@ class PowerFeedbackController:
         interval = float(interval)
 
         if interval <= 0:
-            raise ValueError("interval must be > 0")
+            interval = DEFAULT_INTERVAL
 
         with self.lock:
             self.interval = interval
@@ -181,13 +218,8 @@ class PowerFeedbackController:
 
     def set_target_power(self, target_power_w):
 
-        target_power_w = float(target_power_w)
-
-        if target_power_w <= 0:
-            raise ValueError("target_power_w must be > 0")
-
         with self.lock:
-            self.target_power_w = target_power_w
+            self.target_power_w = float(target_power_w)
 
 
     def set_filter_window(self, filter_window):
@@ -195,9 +227,7 @@ class PowerFeedbackController:
         filter_window = int(filter_window)
 
         if filter_window < 1:
-            raise ValueError(
-                "filter_window must be >= 1"
-            )
+            filter_window = 1
 
         with self.lock:
             self.filter_window = filter_window
@@ -209,93 +239,101 @@ class PowerFeedbackController:
 
     def _kafka_reader(self):
 
-        print("[PowerFeedback] Kafka reader started.")
+        print("[PowerFeedback] Kafka reader started")
 
-        consumer = None
+        consumer = KafkaConsumer(
+            KAFKA_TOPIC,
+            bootstrap_servers=KAFKA_SERVER,
+            value_deserializer=lambda m:
+                json.loads(m.decode("utf-8")),
+            auto_offset_reset="latest",
+            enable_auto_commit=True,
+        )
 
-        try:
 
-            consumer = KafkaConsumer(
-                KAFKA_TOPIC,
-                bootstrap_servers=KAFKA_SERVER,
-                value_deserializer=lambda m:
-                    json.loads(m.decode("utf-8")),
-                auto_offset_reset="latest",
-                enable_auto_commit=True,
+        while not self.stop_event.is_set():
+
+            records = consumer.poll(
+                timeout_ms=500
             )
 
-            while not self.stop_event.is_set():
 
-                records = consumer.poll(
-                    timeout_ms=500
-                )
+            for _, messages in records.items():
 
-                for _, messages in records.items():
+                for msg in messages:
 
-                    for msg in messages:
+                    data = msg.value
 
-                        data = msg.value
+
+                    # ----------------------------------------
+                    # NRP2 microwave powerのみ
+                    # ----------------------------------------
+
+                    if (
+                        data.get("device_name")
+                        != POWER_DEVICE
+                    ):
+                        continue
+
+
+                    if (
+                        data.get("data_type")
+                        != POWER_DATA_TYPE
+                    ):
+                        continue
+
+
+                    value = data.get(
+                        "value",
+                        {}
+                    )
+
+
+                    if (
+                        value.get("channel")
+                        != POWER_CHANNEL
+                    ):
+                        continue
+
+
+                    try:
+
+                        power = float(
+                            value["microwave_power"]
+                        )
+
+                    except (
+                        KeyError,
+                        TypeError,
+                        ValueError
+                    ):
+
+                        continue
+
+
+                    # ----------------------------------------
+                    # 最新値だけ使いたいので
+                    # 古いQueueデータを捨てる
+                    # ----------------------------------------
+
+                    while not self.power_queue.empty():
 
                         try:
+                            self.power_queue.get_nowait()
 
-                            if (
-                                data.get("data_type")
-                                != "microwave_power"
-                            ):
-                                continue
-
-                            value = data["value"]
-
-                            if (
-                                value.get("channel")
-                                != POWER_CHANNEL
-                            ):
-                                continue
-
-                            power = float(
-                                value["microwave_power"]
-                            )
-
-                        except (
-                            KeyError,
-                            TypeError,
-                            ValueError,
-                        ):
-                            continue
-
-                        # Queueには最新値だけ残したい
-                        while not self.power_queue.empty():
-
-                            try:
-                                self.power_queue.get_nowait()
-
-                            except queue.Empty:
-                                break
-
-                        self.power_queue.put(power)
+                        except queue.Empty:
+                            break
 
 
-        except Exception as e:
-
-            print(
-                "[PowerFeedback] "
-                f"Kafka error: {e}"
-            )
-
-            self.stop_event.set()
+                    self.power_queue.put(power)
 
 
-        finally:
+            time.sleep(0.01)
 
-            if consumer is not None:
 
-                try:
-                    consumer.close()
+        consumer.close()
 
-                except Exception:
-                    pass
-
-            print("[PowerFeedback] Kafka reader stopped.")
+        print("[PowerFeedback] Kafka reader stopped")
 
 
     # ========================================================
@@ -304,62 +342,86 @@ class PowerFeedbackController:
 
     def _calculate_pid(
         self,
-        target,
-        measured,
+        target_power,
+        measured_power,
         current_sg_power_dbm,
         prev_error,
         integral_buffer,
         dt,
     ):
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # Error
-        # ----------------------------------------
+        # ----------------------------------------------------
 
-        error = target - measured
-
-
-        # ----------------------------------------
-        # Integral
-        #
-        # 現行仕様と同様、
-        # 「直近10秒程度」の誤差のみ使用
-        # ----------------------------------------
-
-        integral_buffer.append(error)
-
-        max_len = max(
-            1,
-            int(INTEGRAL_WINDOW_TIME / dt)
+        error = (
+            target_power
+            - measured_power
         )
 
-        while len(integral_buffer) > max_len:
+
+        # ----------------------------------------------------
+        # Integral
+        # ----------------------------------------------------
+
+        integral_buffer.append(
+            error
+        )
+
+
+        if dt <= 0:
+            dt = DEFAULT_INTERVAL
+
+
+        max_len = int(
+            INTEGRAL_WINDOW_TIME
+            / dt
+        )
+
+
+        if max_len < 1:
+            max_len = 1
+
+
+        while (
+            len(integral_buffer)
+            > max_len
+        ):
+
             integral_buffer.popleft()
 
-        integral_sum = sum(integral_buffer)
+
+        integral_sum = sum(
+            integral_buffer
+        )
 
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # Derivative
-        # ----------------------------------------
+        # ----------------------------------------------------
 
-        derivative = error - prev_error
+        derivative = (
+            error
+            - prev_error
+        )
 
 
-        # ----------------------------------------
-        # Current SG power -> W
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # Current SG power
+        #
+        # dBm -> W
+        # ----------------------------------------------------
 
         current_sg_power_w = dbm_to_w(
             current_sg_power_dbm
         )
 
 
-        # ----------------------------------------
-        # PID output
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # PID
+        # ----------------------------------------------------
 
-        correction_w = (
+        output = (
             self.kp * error
             + self.ki * integral_sum
             + self.kd * derivative
@@ -368,22 +430,22 @@ class PowerFeedbackController:
 
         new_sg_power_w = (
             current_sg_power_w
-            + correction_w
+            + output
         )
 
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # W -> dBm
-        # ----------------------------------------
+        # ----------------------------------------------------
 
         new_sg_power_dbm = w_to_dbm(
             new_sg_power_w
         )
 
 
-        # ----------------------------------------
-        # Safety limit
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # SG power limit
+        # ----------------------------------------------------
 
         new_sg_power_dbm = max(
             SG_MIN_POWER_DBM,
@@ -408,71 +470,45 @@ class PowerFeedbackController:
 
         print(
             "[PowerFeedback] "
-            f"Waiting for Kafka {POWER_CHANNEL} power..."
+            "Waiting for NRP2 CH2 data..."
         )
+
 
         prev_error = 0.0
         integral_buffer = deque()
 
+
+        with self.lock:
+            filter_window = self.filter_window
+
+
         meas_buffer = deque(
-            maxlen=max(1, self.filter_window)
+            maxlen=max(
+                1,
+                filter_window
+            )
         )
 
 
-        # ----------------------------------------
-        # Wait for first detector value
-        # ----------------------------------------
-
-        while not self.stop_event.is_set():
-
-            try:
-
-                power = self.power_queue.get(
-                    timeout=2.0
-                )
-
-            except queue.Empty:
-
-                print(
-                    "[PowerFeedback] "
-                    "Waiting for detector data..."
-                )
-
-                continue
-
-
-            if power is None:
-                continue
-
-            if power < 1e-12:
-                continue
-
-            # 最初のデータを次のloopでも使用
-            self.power_queue.put(power)
-
-            break
-
-
-        if self.stop_event.is_set():
-            return
-
+        # ----------------------------------------------------
+        # Main loop
+        # ----------------------------------------------------
 
         with self.lock:
             self.feedback_on = True
 
 
-        print("[PowerFeedback] Feedback ON")
+        print(
+            "[PowerFeedback] "
+            "Feedback ON"
+        )
 
-
-        # ========================================
-        # Main feedback loop
-        # ========================================
 
         while not self.stop_event.is_set():
 
-            # ------------------------------------
-            # Get latest power
-            # ------------------------------------
+            # ----------------------------------------
+            # Power取得
+            # ----------------------------------------
 
             try:
 
@@ -484,39 +520,40 @@ class PowerFeedbackController:
 
             except queue.Empty:
 
+                # 既存と同じくデータが来るまで待つ
+                continue
+
+
+            # ----------------------------------------
+            # Power too low
+            # ----------------------------------------
+
+            if (
+                measured_raw is None
+                or measured_raw < 1e-12
+            ):
+
                 print(
                     "[PowerFeedback] "
-                    "No power data."
+                    "Power too low or missing"
                 )
 
                 continue
 
 
-            # ------------------------------------
-            # Safety check
-            # ------------------------------------
-
-            if measured_raw is None:
-                continue
-
-            if measured_raw < 1e-12:
-
-                print(
-                    "[PowerFeedback] "
-                    "Power too low."
-                )
-
-                continue
-
-
-            # ------------------------------------
-            # Read current parameters
-            # ------------------------------------
+            # ----------------------------------------
+            # Current parameters
+            # ----------------------------------------
 
             with self.lock:
 
-                interval = self.interval
-                target = self.target_power_w
+                target_power = (
+                    self.target_power_w
+                )
+
+                interval = (
+                    self.interval
+                )
 
                 filter_window = (
                     self.filter_window
@@ -527,26 +564,30 @@ class PowerFeedbackController:
                 )
 
 
-            # ------------------------------------
-            # Filter window update
-            # ------------------------------------
+            if interval <= 0:
+                interval = 0.1
+
+
+            # ----------------------------------------
+            # Median Filter
+            # ----------------------------------------
 
             filter_window = max(
                 1,
                 int(filter_window)
             )
 
-            if meas_buffer.maxlen != filter_window:
+
+            if (
+                meas_buffer.maxlen
+                != filter_window
+            ):
 
                 meas_buffer = deque(
                     meas_buffer,
                     maxlen=filter_window
                 )
 
-
-            # ------------------------------------
-            # Median filter
-            # ------------------------------------
 
             meas_buffer.append(
                 measured_raw
@@ -568,49 +609,49 @@ class PowerFeedbackController:
                 )
 
 
-            # ------------------------------------
+            # ----------------------------------------
             # PID
-            # ------------------------------------
+            # ----------------------------------------
 
-            new_sg_power_dbm, prev_error = (
-                self._calculate_pid(
-                    target=target,
-                    measured=measured_filtered,
-                    current_sg_power_dbm=
-                        current_sg_power_dbm,
-                    prev_error=prev_error,
-                    integral_buffer=
-                        integral_buffer,
-                    dt=interval,
+            (
+                new_sg_power_dbm,
+                prev_error
+            ) = self._calculate_pid(
+
+                target_power=
+                    target_power,
+
+                measured_power=
+                    measured_filtered,
+
+                current_sg_power_dbm=
+                    current_sg_power_dbm,
+
+                prev_error=
+                    prev_error,
+
+                integral_buffer=
+                    integral_buffer,
+
+                dt=
+                    interval,
+            )
+
+
+            # ----------------------------------------
+            # SG Power変更
+            # ----------------------------------------
+
+            self.sg.SetPower(
+                float(
+                    new_sg_power_dbm
                 )
             )
 
 
-            # ------------------------------------
-            # Set SG power
-            # ------------------------------------
-
-            try:
-
-                self.sg.SetPower(
-                    float(new_sg_power_dbm)
-                )
-
-            except Exception as e:
-
-                print(
-                    "[PowerFeedback] "
-                    f"SG SetPower error: {e}"
-                )
-
-                self.stop_event.set()
-
-                break
-
-
-            # ------------------------------------
-            # Update states
-            # ------------------------------------
+            # ----------------------------------------
+            # State update
+            # ----------------------------------------
 
             with self.lock:
 
@@ -627,23 +668,32 @@ class PowerFeedbackController:
                 )
 
 
+            # ----------------------------------------
+            # Console output
+            # ----------------------------------------
+
             print(
                 "[PowerFeedback] "
                 f"Raw={measured_raw:.3e} W | "
                 f"Filtered={measured_filtered:.3e} W | "
-                f"Target={target:.3e} W | "
+                f"Target={target_power:.3e} W | "
                 f"SG={new_sg_power_dbm:.3f} dBm"
             )
 
 
-            time.sleep(interval)
+            time.sleep(
+                interval
+            )
 
 
         with self.lock:
             self.feedback_on = False
 
 
-        print("[PowerFeedback] Feedback OFF")
+        print(
+            "[PowerFeedback] "
+            "Feedback OFF"
+        )
 
 
     # ========================================================
@@ -657,30 +707,26 @@ class PowerFeedbackController:
         initial_sg_power_dbm=-30.0,
     ):
         """
-        Microwave RF + Power feedback start.
+        Power Feedback開始
 
         Sequence:
-
-        1. Frequency setting
-        2. Initial SG power setting
-        3. RF ON
-        4. Kafka power reader start
-        5. Feedback start
+            Frequency設定
+            -> Initial SG Power設定
+            -> RF ON
+            -> Kafka CH2受信
+            -> Feedback
         """
+
 
         if self.rf_on:
 
             print(
                 "[PowerFeedback] "
-                "Already running."
+                "Already running"
             )
 
-            return False
+            return
 
-
-        # ----------------------------------------
-        # Inputs
-        # ----------------------------------------
 
         frequency_ghz = float(
             frequency_ghz
@@ -698,9 +744,9 @@ class PowerFeedbackController:
             )
 
 
-        # ----------------------------------------
-        # Initial power safety limit
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # Initial SG Power limit
+        # ----------------------------------------------------
 
         initial_sg_power_dbm = max(
             SG_MIN_POWER_DBM,
@@ -711,15 +757,9 @@ class PowerFeedbackController:
         )
 
 
-        print(
-            "[PowerFeedback] "
-            "Starting..."
-        )
-
-
-        # ----------------------------------------
-        # Clear old Queue data
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # Queue clear
+        # ----------------------------------------------------
 
         while not self.power_queue.empty():
 
@@ -730,16 +770,9 @@ class PowerFeedbackController:
                 break
 
 
-        # ----------------------------------------
-        # Reset stop event
-        # ----------------------------------------
-
-        self.stop_event.clear()
-
-
-        # ----------------------------------------
-        # Store state
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # State
+        # ----------------------------------------------------
 
         with self.lock:
 
@@ -756,29 +789,33 @@ class PowerFeedbackController:
             )
 
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # SG Frequency
-        # ----------------------------------------
+        # ----------------------------------------------------
 
         self.sg.SetFrequency(
-            frequency_ghz * 1e9
+            frequency_ghz
+            * 1e9
         )
 
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # Initial SG Power
-        # ----------------------------------------
+        # ----------------------------------------------------
 
         self.sg.SetPower(
-            float(initial_sg_power_dbm)
+            initial_sg_power_dbm
         )
 
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # RF ON
-        # ----------------------------------------
+        # ----------------------------------------------------
 
-        self.sg.SetIO("ON")
+        self.sg.SetIO(
+            "ON"
+        )
+
 
         with self.lock:
             self.rf_on = True
@@ -792,31 +829,29 @@ class PowerFeedbackController:
         )
 
 
-        # ----------------------------------------
-        # Kafka reader
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # Threads start
+        # ----------------------------------------------------
+
+        self.stop_event.clear()
+
 
         self.kafka_thread = threading.Thread(
-            target=self._kafka_reader,
-            daemon=True,
+            target=
+                self._kafka_reader,
+            daemon=True
         )
 
 
-        # ----------------------------------------
-        # Feedback
-        # ----------------------------------------
-
         self.feedback_thread = threading.Thread(
-            target=self._feedback_loop,
-            daemon=True,
+            target=
+                self._feedback_loop,
+            daemon=True
         )
 
 
         self.kafka_thread.start()
         self.feedback_thread.start()
-
-
-        return True
 
 
     # ========================================================
@@ -825,12 +860,20 @@ class PowerFeedbackController:
 
     def stop(self):
         """
-        Sequence:
-
-        1. Feedback stop
-        2. Kafka reader stop
-        3. RF OFF
+        Feedback停止
+          -> RF OFF
         """
+
+
+        if not self.rf_on:
+
+            print(
+                "[PowerFeedback] "
+                "Already stopped"
+            )
+
+            return
+
 
         print(
             "[PowerFeedback] "
@@ -838,16 +881,16 @@ class PowerFeedbackController:
         )
 
 
-        # ----------------------------------------
-        # Stop threads
-        # ----------------------------------------
+        # ----------------------------------------------------
+        # Feedback / Kafka stop
+        # ----------------------------------------------------
 
         self.stop_event.set()
 
 
         if (
-            self.feedback_thread is not None
-            and self.feedback_thread.is_alive()
+            self.feedback_thread
+            is not None
         ):
 
             self.feedback_thread.join(
@@ -856,8 +899,8 @@ class PowerFeedbackController:
 
 
         if (
-            self.kafka_thread is not None
-            and self.kafka_thread.is_alive()
+            self.kafka_thread
+            is not None
         ):
 
             self.kafka_thread.join(
@@ -865,25 +908,14 @@ class PowerFeedbackController:
             )
 
 
-        # ----------------------------------------
+        # ----------------------------------------------------
         # RF OFF
-        # ----------------------------------------
+        # ----------------------------------------------------
 
-        try:
+        self.sg.SetIO(
+            "OFF"
+        )
 
-            self.sg.SetIO("OFF")
-
-        except Exception as e:
-
-            print(
-                "[PowerFeedback] "
-                f"RF OFF error: {e}"
-            )
-
-
-        # ----------------------------------------
-        # State reset
-        # ----------------------------------------
 
         with self.lock:
 
@@ -891,8 +923,8 @@ class PowerFeedbackController:
             self.feedback_on = False
 
 
-        self.kafka_thread = None
         self.feedback_thread = None
+        self.kafka_thread = None
 
 
         print(
@@ -901,11 +933,8 @@ class PowerFeedbackController:
         )
 
 
-        return True
-
-
     # ========================================================
-    # Status
+    # Current status
     # ========================================================
 
     def get_status(self):
@@ -950,13 +979,3 @@ class PowerFeedbackController:
                 "filter_window":
                     self.filter_window,
             }
-
-
-    # ========================================================
-    # Cleanup
-    # ========================================================
-
-    def close(self):
-
-        if self.rf_on:
-            self.stop()
