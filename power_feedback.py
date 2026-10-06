@@ -843,6 +843,7 @@ class PowerFeedbackController:
         )
 
 
+
         self.feedback_thread = threading.Thread(
             target=
                 self._feedback_loop,
