@@ -1,5 +1,6 @@
 # ============================================================
 # power_feedback.py
+#
 # Microwave Power Feedback Controller
 #
 # Power data:
@@ -71,6 +72,7 @@ DEFAULT_FILTER_WINDOW = 1
 
 # 積分項は直近10秒分
 INTEGRAL_WINDOW_TIME = 10.0
+POWER_TOO_LOW_W = 1e-12
 
 
 # ============================================================
@@ -79,6 +81,22 @@ INTEGRAL_WINDOW_TIME = 10.0
 
 SG_MIN_POWER_DBM = -50.0
 SG_MAX_POWER_DBM = 5.0
+
+
+# ============================================================
+# Utility helpers
+# ============================================================
+
+def clamp(value, lower, upper):
+    return max(lower, min(upper, value))
+
+
+def drain_queue(queue_obj):
+    while not queue_obj.empty():
+        try:
+            queue_obj.get_nowait()
+        except queue.Empty:
+            break
 
 
 # ============================================================
@@ -249,90 +267,41 @@ class PowerFeedbackController:
             enable_auto_commit=True,
         )
 
+        try:
+            while not self.stop_event.is_set():
 
-        while not self.stop_event.is_set():
+                records = consumer.poll(timeout_ms=500)
 
-            records = consumer.poll(
-                timeout_ms=500
-            )
+                for _, messages in records.items():
+                    for msg in messages:
+                        data = msg.value
 
+                        # NRP2 microwave powerのみ
+                        if data.get("device_name") != POWER_DEVICE:
+                            continue
 
-            for _, messages in records.items():
+                        if data.get("data_type") != POWER_DATA_TYPE:
+                            continue
 
-                for msg in messages:
+                        value = data.get("value", {})
 
-                    data = msg.value
-
-
-                    # ----------------------------------------
-                    # NRP2 microwave powerのみ
-                    # ----------------------------------------
-
-                    if (
-                        data.get("device_name")
-                        != POWER_DEVICE
-                    ):
-                        continue
-
-
-                    if (
-                        data.get("data_type")
-                        != POWER_DATA_TYPE
-                    ):
-                        continue
-
-
-                    value = data.get(
-                        "value",
-                        {}
-                    )
-
-
-                    if (
-                        value.get("channel")
-                        != POWER_CHANNEL
-                    ):
-                        continue
-
-
-                    try:
-
-                        power = float(
-                            value["microwave_power"]
-                        )
-
-                    except (
-                        KeyError,
-                        TypeError,
-                        ValueError
-                    ):
-
-                        continue
-
-
-                    # ----------------------------------------
-                    # 最新値だけ使いたいので
-                    # 古いQueueデータを捨てる
-                    # ----------------------------------------
-
-                    while not self.power_queue.empty():
+                        if value.get("channel") != POWER_CHANNEL:
+                            continue
 
                         try:
-                            self.power_queue.get_nowait()
+                            power = float(value["microwave_power"])
+                        except (KeyError, TypeError, ValueError):
+                            continue
 
-                        except queue.Empty:
-                            break
+                        # 最新値だけ使いたいので古いQueueデータを捨てる
+                        drain_queue(self.power_queue)
+                        self.power_queue.put(power)
 
+                time.sleep(0.01)
 
-                    self.power_queue.put(power)
-
-
-            time.sleep(0.01)
-
-
-        consumer.close()
-
-        print("[PowerFeedback] Kafka reader stopped")
+        finally:
+            consumer.close()
+            print("[PowerFeedback] Kafka reader stopped")
 
 
     # ========================================================
@@ -349,76 +318,24 @@ class PowerFeedbackController:
         dt,
     ):
 
-        # ----------------------------------------------------
-        # Error
-        # ----------------------------------------------------
+        error = target_power - measured_power
 
-        error = (
-            target_power
-            - measured_power
-        )
-
-
-        # ----------------------------------------------------
-        # Integral
-        # ----------------------------------------------------
-
-        integral_buffer.append(
-            error
-        )
-
+        integral_buffer.append(error)
 
         if dt <= 0:
             dt = DEFAULT_INTERVAL
 
-
-        max_len = int(
-            INTEGRAL_WINDOW_TIME
-            / dt
-        )
-
-
+        max_len = int(INTEGRAL_WINDOW_TIME / dt)
         if max_len < 1:
             max_len = 1
 
-
-        while (
-            len(integral_buffer)
-            > max_len
-        ):
-
+        while len(integral_buffer) > max_len:
             integral_buffer.popleft()
 
+        integral_sum = sum(integral_buffer)
+        derivative = error - prev_error
 
-        integral_sum = sum(
-            integral_buffer
-        )
-
-
-        # ----------------------------------------------------
-        # Derivative
-        # ----------------------------------------------------
-
-        derivative = (
-            error
-            - prev_error
-        )
-
-
-        # ----------------------------------------------------
-        # Current SG power
-        #
-        # dBm -> W
-        # ----------------------------------------------------
-
-        current_sg_power_w = dbm_to_w(
-            current_sg_power_dbm
-        )
-
-
-        # ----------------------------------------------------
-        # PID
-        # ----------------------------------------------------
+        current_sg_power_w = dbm_to_w(current_sg_power_dbm)
 
         output = (
             self.kp * error
@@ -426,39 +343,11 @@ class PowerFeedbackController:
             + self.kd * derivative
         )
 
+        new_sg_power_w = current_sg_power_w + output
+        new_sg_power_dbm = w_to_dbm(new_sg_power_w)
+        new_sg_power_dbm = clamp(new_sg_power_dbm, SG_MIN_POWER_DBM, SG_MAX_POWER_DBM)
 
-        new_sg_power_w = (
-            current_sg_power_w
-            + output
-        )
-
-
-        # ----------------------------------------------------
-        # W -> dBm
-        # ----------------------------------------------------
-
-        new_sg_power_dbm = w_to_dbm(
-            new_sg_power_w
-        )
-
-
-        # ----------------------------------------------------
-        # SG power limit
-        # ----------------------------------------------------
-
-        new_sg_power_dbm = max(
-            SG_MIN_POWER_DBM,
-            min(
-                SG_MAX_POWER_DBM,
-                new_sg_power_dbm
-            )
-        )
-
-
-        return (
-            new_sg_power_dbm,
-            error
-        )
+        return new_sg_power_dbm, error
 
 
     # ========================================================
@@ -467,209 +356,68 @@ class PowerFeedbackController:
 
     def _feedback_loop(self):
 
-        print(
-            "[PowerFeedback] "
-            "Waiting for NRP2 CH2 data..."
-        )
-
+        print("[PowerFeedback] Waiting for NRP2 CH2 data...")
 
         prev_error = 0.0
         integral_buffer = deque()
 
-
         with self.lock:
             filter_window = self.filter_window
 
-
-        meas_buffer = deque(
-            maxlen=max(
-                1,
-                filter_window
-            )
-        )
-
-
-        # ----------------------------------------------------
-        # Main loop
-        # ----------------------------------------------------
+        meas_buffer = deque(maxlen=max(1, filter_window))
 
         with self.lock:
             self.feedback_on = True
 
-
-        print(
-            "[PowerFeedback] "
-            "Feedback ON"
-        )
-
+        print("[PowerFeedback] Feedback ON")
 
         while not self.stop_event.is_set():
 
-            # ----------------------------------------
-            # Power取得
-            # ----------------------------------------
-
             try:
-
-                measured_raw = (
-                    self.power_queue.get(
-                        timeout=2.0
-                    )
-                )
-
+                measured_raw = self.power_queue.get(timeout=2.0)
             except queue.Empty:
-
-                # 既存と同じくデータが来るまで待つ
                 continue
 
-
-            # ----------------------------------------
-            # Power too low
-            # ----------------------------------------
-
-            if (
-                measured_raw is None
-                or measured_raw < 1e-12
-            ):
-
-                print(
-                    "[PowerFeedback] "
-                    "Power too low or missing"
-                )
-
+            if measured_raw is None or measured_raw < POWER_TOO_LOW_W:
+                print("[PowerFeedback] Power too low or missing")
                 continue
-
-
-            # ----------------------------------------
-            # Current parameters
-            # ----------------------------------------
 
             with self.lock:
-
-                target_power = (
-                    self.target_power_w
-                )
-
-                interval = (
-                    self.interval
-                )
-
-                filter_window = (
-                    self.filter_window
-                )
-
-                current_sg_power_dbm = (
-                    self.current_sg_power_dbm
-                )
-
+                target_power = self.target_power_w
+                interval = self.interval
+                filter_window = self.filter_window
+                current_sg_power_dbm = self.current_sg_power_dbm
 
             if interval <= 0:
                 interval = 0.1
 
+            filter_window = max(1, int(filter_window))
 
-            # ----------------------------------------
-            # Median Filter
-            # ----------------------------------------
+            if meas_buffer.maxlen != filter_window:
+                meas_buffer = deque(meas_buffer, maxlen=filter_window)
 
-            filter_window = max(
-                1,
-                int(filter_window)
-            )
-
-
-            if (
-                meas_buffer.maxlen
-                != filter_window
-            ):
-
-                meas_buffer = deque(
-                    meas_buffer,
-                    maxlen=filter_window
-                )
-
-
-            meas_buffer.append(
-                measured_raw
-            )
-
+            meas_buffer.append(measured_raw)
 
             if filter_window == 1:
-
-                measured_filtered = (
-                    measured_raw
-                )
-
+                measured_filtered = measured_raw
             else:
+                measured_filtered = statistics.median(meas_buffer)
 
-                measured_filtered = (
-                    statistics.median(
-                        meas_buffer
-                    )
-                )
-
-
-            # ----------------------------------------
-            # PID
-            # ----------------------------------------
-
-            (
-                new_sg_power_dbm,
-                prev_error
-            ) = self._calculate_pid(
-
-                target_power=
-                    target_power,
-
-                measured_power=
-                    measured_filtered,
-
-                current_sg_power_dbm=
-                    current_sg_power_dbm,
-
-                prev_error=
-                    prev_error,
-
-                integral_buffer=
-                    integral_buffer,
-
-                dt=
-                    interval,
+            new_sg_power_dbm, prev_error = self._calculate_pid(
+                target_power=target_power,
+                measured_power=measured_filtered,
+                current_sg_power_dbm=current_sg_power_dbm,
+                prev_error=prev_error,
+                integral_buffer=integral_buffer,
+                dt=interval,
             )
 
-
-            # ----------------------------------------
-            # SG Power変更
-            # ----------------------------------------
-
-            self.sg.SetPower(
-                float(
-                    new_sg_power_dbm
-                )
-            )
-
-
-            # ----------------------------------------
-            # State update
-            # ----------------------------------------
+            self.sg.SetPower(float(new_sg_power_dbm))
 
             with self.lock:
-
-                self.current_sg_power_dbm = (
-                    new_sg_power_dbm
-                )
-
-                self.measured_power_raw_w = (
-                    measured_raw
-                )
-
-                self.measured_power_filtered_w = (
-                    measured_filtered
-                )
-
-
-            # ----------------------------------------
-            # Console output
-            # ----------------------------------------
+                self.current_sg_power_dbm = new_sg_power_dbm
+                self.measured_power_raw_w = measured_raw
+                self.measured_power_filtered_w = measured_filtered
 
             print(
                 "[PowerFeedback] "
@@ -679,20 +427,12 @@ class PowerFeedbackController:
                 f"SG={new_sg_power_dbm:.3f} dBm"
             )
 
-
-            time.sleep(
-                interval
-            )
-
+            time.sleep(interval)
 
         with self.lock:
             self.feedback_on = False
 
-
-        print(
-            "[PowerFeedback] "
-            "Feedback OFF"
-        )
+        print("[PowerFeedback] Feedback OFF")
 
 
     # ========================================================
@@ -747,12 +487,10 @@ class PowerFeedbackController:
         # Initial SG Power limit
         # ----------------------------------------------------
 
-        initial_sg_power_dbm = max(
+        initial_sg_power_dbm = clamp(
+            initial_sg_power_dbm,
             SG_MIN_POWER_DBM,
-            min(
-                SG_MAX_POWER_DBM,
-                initial_sg_power_dbm
-            )
+            SG_MAX_POWER_DBM,
         )
 
 
@@ -760,13 +498,7 @@ class PowerFeedbackController:
         # Queue clear
         # ----------------------------------------------------
 
-        while not self.power_queue.empty():
-
-            try:
-                self.power_queue.get_nowait()
-
-            except queue.Empty:
-                break
+        drain_queue(self.power_queue)
 
 
         # ----------------------------------------------------
