@@ -1,5 +1,6 @@
 # TM_set.py
-#TM210に接続(c-NOを接続)するための印加電圧/電流設定値
+# Type2（R570412000）: OFFでC-NC（TM110）、12V ONでC-NO（TM210）
+# 定格電流250mA（25°C ±10%）に対し、電流上限を300mAに設定
 
-VOLTAGE = 3.0   # V
-CURRENT = 0.01  # A
+VOLTAGE = 12.0  # V
+CURRENT = 0.30  # A（電流上限）

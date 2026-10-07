@@ -3,9 +3,9 @@
 #
 # PMX32-2QU を用いたマイクロ波スイッチ制御
 #
-# CH2 : SG / VNA 切替
-# CH3 : 共通12V供給
-# CH4 : TM110 / TM210 切替
+# CH2 : 3V制御。SG / VNA と Pickupのpower sensor2 / VNAを配線で連動
+# CH3 : Type1スイッチ2個への常時12V供給
+# CH4 : Type2への12V供給。OFF=TM110（NC）、ON=TM210（NO）
 # ============================================================
 
 import socket
@@ -226,12 +226,12 @@ def set_switch(mode1, mode2):
         print("Current Status")
         print("===================================")
 
-        print_channel_status(s, CH_SWITCH1, "Switch1 SG/VNA")
+        print_channel_status(s, CH_SWITCH1, "SG/VNA + Pickup sensor2/VNA (3V)")
         print_channel_status(s, CH_COMMON,  "Common 12V")
-        print_channel_status(s, CH_SWITCH2, "Switch2 TM")
+        print_channel_status(s, CH_SWITCH2, "TM110(NC)/TM210(NO) (12V)")
 
         # ====================================================
-        # CH3 : 共通12V供給
+        # CH3 : Type1スイッチ2個への常時12V供給
         # ====================================================
 
         print("\n===================================")
@@ -303,9 +303,9 @@ def set_switch(mode1, mode2):
         print("Final Status")
         print("===================================")
 
-        print_channel_status(s, CH_SWITCH1, "Switch1 SG/VNA")
+        print_channel_status(s, CH_SWITCH1, "SG/VNA + Pickup sensor2/VNA (3V)")
         print_channel_status(s, CH_COMMON,  "Common 12V")
-        print_channel_status(s, CH_SWITCH2, "Switch2 TM")
+        print_channel_status(s, CH_SWITCH2, "TM110(NC)/TM210(NO) (12V)")
 
         print("\n===================================")
         print("Switch configuration completed")
