@@ -3,7 +3,7 @@
 #
 # PMX32-2QU を用いたマイクロ波スイッチ制御
 #
-# CH2 : 3V制御。SG / VNA と Pickupのpower sensor2 / VNAを配線で連動
+# CH2 : 3V制御。AMP / VNA と Pickupのpower sensor2 / VNAを配線で連動
 # CH3 : Type1スイッチ2個への常時12V供給
 # CH4 : Type2への12V供給。OFF=TM110（NC）、ON=TM210（NO）
 # ============================================================
@@ -30,7 +30,7 @@ MAX_VOLTAGE = 15.0
 MAX_CURRENT = 5.0
 
 # ===== 設定ファイル読み込み =====
-import SGvsVNA_set
+import AMPvsVNA_set
 import TM_set
 
 
@@ -156,9 +156,9 @@ def set_switch(mode1, mode2):
     # 引数チェック
     # ========================================================
 
-    if mode1 not in ["SG", "VNA"]:
+    if mode1 not in ["AMP", "VNA"]:
 
-        raise ValueError("mode1 must be SG or VNA")
+        raise ValueError("mode1 must be AMP or VNA")
 
     if mode2 not in ["TM110", "TM210"]:
 
@@ -168,8 +168,8 @@ def set_switch(mode1, mode2):
     # 設定値読み込み
     # ========================================================
 
-    sw1_voltage = SGvsVNA_set.VOLTAGE
-    sw1_current = SGvsVNA_set.CURRENT
+    sw1_voltage = AMPvsVNA_set.VOLTAGE
+    sw1_current = AMPvsVNA_set.CURRENT
 
     sw2_voltage = TM_set.VOLTAGE
     sw2_current = TM_set.CURRENT
@@ -226,7 +226,7 @@ def set_switch(mode1, mode2):
         print("Current Status")
         print("===================================")
 
-        print_channel_status(s, CH_SWITCH1, "SG/VNA + Pickup sensor2/VNA (3V)")
+        print_channel_status(s, CH_SWITCH1, "AMP/VNA + Pickup sensor2/VNA (3V)")
         print_channel_status(s, CH_COMMON,  "Common 12V")
         print_channel_status(s, CH_SWITCH2, "TM110(NC)/TM210(NO) (12V)")
 
@@ -248,7 +248,7 @@ def set_switch(mode1, mode2):
         output_on(s, CH_COMMON)
 
         # ====================================================
-        # CH2 : SG / VNA
+        # CH2 : AMP / VNA
         # ====================================================
 
         print("\n===================================")
@@ -262,7 +262,7 @@ def set_switch(mode1, mode2):
             sw1_current
         )
 
-        if mode1 == "SG":
+        if mode1 == "AMP":
 
             output_off(s, CH_SWITCH1)
 
@@ -303,7 +303,7 @@ def set_switch(mode1, mode2):
         print("Final Status")
         print("===================================")
 
-        print_channel_status(s, CH_SWITCH1, "SG/VNA + Pickup sensor2/VNA (3V)")
+        print_channel_status(s, CH_SWITCH1, "AMP/VNA + Pickup sensor2/VNA (3V)")
         print_channel_status(s, CH_COMMON,  "Common 12V")
         print_channel_status(s, CH_SWITCH2, "TM110(NC)/TM210(NO) (12V)")
 
@@ -321,7 +321,7 @@ def main():
     if len(sys.argv) < 2:
 
         print("Usage:")
-        print("python3 Switchcontrol.py [SG|VNA] [TM110|TM210]")
+        print("python3 Switchcontrol.py [AMP|VNA] [TM110|TM210]")
         print("python3 Switchcontrol.py [OFF|ALLOFF]")
 
         sys.exit(1)
@@ -342,7 +342,7 @@ def main():
     if len(sys.argv) != 3:
 
         print("Usage:")
-        print("python3 Switchcontrol.py [SG|VNA] [TM110|TM210]")
+        print("python3 Switchcontrol.py [AMP|VNA] [TM110|TM210]")
 
         sys.exit(1)
 

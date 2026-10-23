@@ -19,7 +19,7 @@
 #   feedback.start(
 #       frequency_ghz=1.8974,
 #       target_power_w=7e-6,
-#       initial_sg_power_dbm=-30.0
+#       initial_amp_power_dbm=-30.0
 #   )
 #
 #   feedback.stop()
@@ -45,7 +45,7 @@ from RaS_SMB_100A import RaS_SMB_100A
 # Device settings
 # ============================================================
 
-SG_IP = "192.168.12.229"
+AMP_IP = "192.168.12.229"
 
 
 # ============================================================
@@ -64,7 +64,7 @@ POWER_CHANNEL = "CH2"
 # Feedback default parameters
 # ============================================================
 
-# Conservative starting gains: PID output is added to SG power in watts.
+# Conservative starting gains: PID output is added to AMP power in watts.
 DEFAULT_KP = 1.0
 DEFAULT_KI = 0.0
 DEFAULT_KD = 0.0
@@ -79,11 +79,11 @@ POWER_TOO_LOW_W = 1e-12
 
 
 # ============================================================
-# SG power limits
+# AMP power limits
 # ============================================================
 
-SG_MIN_POWER_DBM = -25.0
-SG_MAX_POWER_DBM = -6.0
+AMP_MIN_POWER_DBM = -25.0
+AMP_MAX_POWER_DBM = -6.0
 
 
 # ============================================================
@@ -119,7 +119,7 @@ def w_to_dbm(watt):
     """
 
     if watt <= 0:
-        return SG_MIN_POWER_DBM
+        return AMP_MIN_POWER_DBM
 
     return 10.0 * np.log10(watt * 1000.0)
 
@@ -170,13 +170,13 @@ class PowerFeedbackController:
 
 
         # ----------------------------------------------------
-        # Current SG state
+        # Current AMP state
         # ----------------------------------------------------
 
         self.frequency_ghz = None
 
-        self.initial_sg_power_dbm = None
-        self.current_sg_power_dbm = None
+        self.initial_amp_power_dbm = None
+        self.current_amp_power_dbm = None
 
 
         # ----------------------------------------------------
@@ -210,10 +210,10 @@ class PowerFeedbackController:
 
 
         # ----------------------------------------------------
-        # SG connection
+        # AMP connection
         # ----------------------------------------------------
 
-        self.sg = RaS_SMB_100A(SG_IP)
+        self.amp = RaS_SMB_100A(AMP_IP)
 
 
         # ----------------------------------------------------
@@ -331,7 +331,7 @@ class PowerFeedbackController:
         self,
         target_power,
         measured_power,
-        current_sg_power_dbm,
+        current_amp_power_dbm,
         prev_error,
         integral_buffer,
         dt,
@@ -354,7 +354,7 @@ class PowerFeedbackController:
         integral_sum = sum(integral_buffer)
         derivative = error - prev_error
 
-        current_sg_power_w = dbm_to_w(current_sg_power_dbm)
+        current_amp_power_w = dbm_to_w(current_amp_power_dbm)
 
         output = (
             self.kp * error
@@ -362,11 +362,11 @@ class PowerFeedbackController:
             + self.kd * derivative
         )
 
-        new_sg_power_w = current_sg_power_w + output
-        new_sg_power_dbm = w_to_dbm(new_sg_power_w)
-        new_sg_power_dbm = clamp(new_sg_power_dbm, SG_MIN_POWER_DBM, SG_MAX_POWER_DBM)
+        new_amp_power_w = current_amp_power_w + output
+        new_amp_power_dbm = w_to_dbm(new_amp_power_w)
+        new_amp_power_dbm = clamp(new_amp_power_dbm, AMP_MIN_POWER_DBM, AMP_MAX_POWER_DBM)
 
-        return new_sg_power_dbm, error
+        return new_amp_power_dbm, error
 
 
     # ========================================================
@@ -405,7 +405,7 @@ class PowerFeedbackController:
                 target_power = self.target_power_w
                 interval = self.interval
                 filter_window = self.filter_window
-                current_sg_power_dbm = self.current_sg_power_dbm
+                current_amp_power_dbm = self.current_amp_power_dbm
 
             if interval <= 0:
                 interval = 0.1
@@ -422,19 +422,19 @@ class PowerFeedbackController:
             else:
                 measured_filtered = statistics.median(meas_buffer)
 
-            new_sg_power_dbm, prev_error = self._calculate_pid(
+            new_amp_power_dbm, prev_error = self._calculate_pid(
                 target_power=target_power,
                 measured_power=measured_filtered,
-                current_sg_power_dbm=current_sg_power_dbm,
+                current_amp_power_dbm=current_amp_power_dbm,
                 prev_error=prev_error,
                 integral_buffer=integral_buffer,
                 dt=interval,
             )
 
-            self.sg.SetPower(float(new_sg_power_dbm))
+            self.amp.SetPower(float(new_amp_power_dbm))
 
             with self.lock:
-                self.current_sg_power_dbm = new_sg_power_dbm
+                self.current_amp_power_dbm = new_amp_power_dbm
                 self.measured_power_raw_w = measured_raw
                 self.measured_power_filtered_w = measured_filtered
 
@@ -443,7 +443,7 @@ class PowerFeedbackController:
                 f"Raw={measured_raw:.3e} W | "
                 f"Filtered={measured_filtered:.3e} W | "
                 f"Target={target_power:.3e} W | "
-                f"SG={new_sg_power_dbm:.3f} dBm"
+                f"AMP={new_amp_power_dbm:.3f} dBm"
             )
             self._measurement_logger.info(message)
             if self.console_output:
@@ -465,14 +465,14 @@ class PowerFeedbackController:
         self,
         frequency_ghz,
         target_power_w=None,
-        initial_sg_power_dbm=-30.0,
+        initial_amp_power_dbm=-30.0,
     ):
         """
         Power Feedback開始
 
         Sequence:
             Frequency設定
-            -> Initial SG Power設定
+            -> Initial AMP Power設定
             -> RF ON
             -> Kafka CH2受信
             -> Feedback
@@ -493,8 +493,8 @@ class PowerFeedbackController:
             frequency_ghz
         )
 
-        initial_sg_power_dbm = float(
-            initial_sg_power_dbm
+        initial_amp_power_dbm = float(
+            initial_amp_power_dbm
         )
 
 
@@ -506,13 +506,13 @@ class PowerFeedbackController:
 
 
         # ----------------------------------------------------
-        # Initial SG Power limit
+        # Initial AMP Power limit
         # ----------------------------------------------------
 
-        initial_sg_power_dbm = clamp(
-            initial_sg_power_dbm,
-            SG_MIN_POWER_DBM,
-            SG_MAX_POWER_DBM,
+        initial_amp_power_dbm = clamp(
+            initial_amp_power_dbm,
+            AMP_MIN_POWER_DBM,
+            AMP_MAX_POWER_DBM,
         )
 
 
@@ -533,31 +533,31 @@ class PowerFeedbackController:
                 frequency_ghz
             )
 
-            self.initial_sg_power_dbm = (
-                initial_sg_power_dbm
+            self.initial_amp_power_dbm = (
+                initial_amp_power_dbm
             )
 
-            self.current_sg_power_dbm = (
-                initial_sg_power_dbm
+            self.current_amp_power_dbm = (
+                initial_amp_power_dbm
             )
 
 
         # ----------------------------------------------------
-        # SG Frequency
+        # AMP Frequency
         # ----------------------------------------------------
 
-        self.sg.SetFrequency(
+        self.amp.SetFrequency(
             frequency_ghz
             * 1e9
         )
 
 
         # ----------------------------------------------------
-        # Initial SG Power
+        # Initial AMP Power
         # ----------------------------------------------------
 
-        self.sg.SetPower(
-            initial_sg_power_dbm
+        self.amp.SetPower(
+            initial_amp_power_dbm
         )
 
 
@@ -565,7 +565,7 @@ class PowerFeedbackController:
         # RF ON
         # ----------------------------------------------------
 
-        self.sg.SetIO(
+        self.amp.SetIO(
             "ON"
         )
 
@@ -578,7 +578,7 @@ class PowerFeedbackController:
             "[PowerFeedback] "
             f"RF ON | "
             f"{frequency_ghz:.9f} GHz | "
-            f"{initial_sg_power_dbm:.2f} dBm"
+            f"{initial_amp_power_dbm:.2f} dBm"
         )
 
 
@@ -667,7 +667,7 @@ class PowerFeedbackController:
         # RF OFF
         # ----------------------------------------------------
 
-        self.sg.SetIO(
+        self.amp.SetIO(
             "OFF"
         )
 
@@ -709,8 +709,8 @@ class PowerFeedbackController:
                 "frequency_ghz":
                     self.frequency_ghz,
 
-                "sg_power_dbm":
-                    self.current_sg_power_dbm,
+                "amp_power_dbm":
+                    self.current_amp_power_dbm,
 
                 "target_power_w":
                     self.target_power_w,

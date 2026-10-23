@@ -677,7 +677,7 @@ def tune_piezo(
             )
 
             print(
-                f"SG frequency    : "
+                f"AMP frequency    : "
                 f"{f0:.9f} GHz"
             )
 

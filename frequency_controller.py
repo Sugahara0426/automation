@@ -583,7 +583,7 @@ def save_vna_data(
     )
 
     # ========================================================
-    # Feedback / Final / SGに使用する周波数
+    # Feedback / Final / AMPに使用する周波数
     # ========================================================
 
     return resonance_frequency
@@ -857,18 +857,18 @@ def run_controller(atc):
                     )
 
                     print(
-                        f"SG frequency    : "
+                        f"AMP frequency    : "
                         f"{final_f0:.9f} GHz"
                     )
 
                     # =================================================
-                    # 将来ここでSGへ周波数設定
+                    # 将来ここでAMPへ周波数設定
                     #
                     # final_f0は
                     # 最後に保存したPNGのResonanceと同じ値
                     # =================================================
                     #
-                    # set_sg_frequency(final_f0)
+                    # set_amp_frequency(final_f0)
 
                     print(
                         "\nWaiting for next "
