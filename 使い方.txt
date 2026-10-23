@@ -5,7 +5,7 @@
 
 ◯特性評価/実験、TM110/TM210を切り替える
 
-% python Switchcontrol.py VNA TM110
+% python Switchcontrol.py AMP TM110
 ・引数1 VNA or AMP
 ・引数2 TM110 or TM210
 
@@ -110,15 +110,22 @@ VNAの個別操作：vna_tools.py
 
 Piezo調整
 
-①ANC350を初期化する：piezo_move.py
+①スイッチをVNA側・使用するモードに切り替える
+
+
+% python Switchcontrol.py VNA TM110
+
+
+・TM210の場合はTM210を指定する。
+
+
+②ANC350を初期化する：piezo_move.py
 ・ ANC350をUSBでWindows PCに接続する。
 ・ Windows PCで piezo_move.py を実行し、初期化する。
 ・ USBをWindows PCからLinux PCへ差し替える。
 
 
-
-
-②Linux PCで受信プログラムを起動する：frequency_controller.py
+③Linux PCで受信プログラムを起動する：frequency_controller.py
 
 % python frequency_controller.py
 
@@ -128,7 +135,7 @@ Piezo調整
 ・この受信側のターミナルに、現在の周波数・目標との差・移動step数・最終結果が表示される。
 ・調整終了後は、次の指示を待ち受ける。
 
-③別タブでPythonを起動し、送信側を準備する
+④別タブでPythonを起動し、送信側を準備する
 
 ◯python起動後
 >>> from frequency_command import FrequencyCommandProducer
@@ -186,10 +193,10 @@ Piezo調整
 >>> feedback.start(frequency_ghz=1.8974, target_power_w=7e-6, initial_amp_power_dbm=-25.0)
 
 
-・frequency_ghz：AMPの周波数［GHz］
+・frequency_ghz：SGの周波数［GHz］
 ・target_power_w：NRP2 CH2で測定する目標パワー［W］
-・initial_amp_power_dbm：開始時のAMP出力［dBm］
-・周波数設定 → 初期AMP出力設定 → AMP出力ON → フィードバック開始まで行う。
+・initial_amp_power_dbm：開始時のSG出力［dBm］
+・周波数設定 → 初期SG出力設定 → SG出力ON → フィードバック開始まで行う。
 
 ◯設定の変更
 変更後の設定は、次の制御計算から使われる
@@ -212,10 +219,10 @@ PIDの係数を変更する
 
 ◯現在の状態を確認する
 >>> feedback.get_status()
-・AMP出力ON/OFF、フィードバック状態、周波数、AMP出力、目標値、最新の測定値などを表示する。
+・SG出力ON/OFF、フィードバック状態、周波数、SG出力、目標値、最新の測定値などを表示する。
 
 
-◯フィードバックを停止し、AMP出力をOFFにする
+◯フィードバックを停止し、SG出力をOFFにする
 >>> feedback.stop()
 
 ◯ログのパスを確認
@@ -224,3 +231,16 @@ PIDの係数を変更する
 ◯測定ログのリアルタイム確認
 別のタブで
 % tail -f ログのパス
+
+
+
+1port運用
+TM110・TM210の両方を、TM110側の入力ポートで測定する。
+
+◯スイッチ操作はSwitchcontrol_1port.pyを使用する
+・TM110／TM210のどちらを指定しても、物理入力はTM110側に固定される。
+
+◯Piezo調整の受信側はfrequency_controller_1port.pyを使用する
+・周波数調整の処理・piezo軸・周波数範囲は従来版と同じ
+・保存するCSV・PNGの名前に1port_input_TM110を追加。
+・保存する図に、入力がTM110側であることを表示。
