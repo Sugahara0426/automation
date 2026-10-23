@@ -460,7 +460,7 @@ def save_vna_data(
         s11_amplitudes[min_index]
     )
 
-    error_khz = (
+    residual_khz = (
         target_frequency
         - resonance_frequency
     ) * 1e6
@@ -480,8 +480,8 @@ def save_vna_data(
     )
 
     print(
-        f"Error     : "
-        f"{error_khz:+.3f} kHz"
+        f"Residual  : "
+        f"{residual_khz:+.3f} kHz"
     )
 
     # ========================================================
@@ -527,7 +527,7 @@ def save_vna_data(
         f"Pre-save  : {current_frequency:.9f} GHz\n"
         f"Target    : {target_frequency:.9f} GHz\n"
         f"Resonance : {resonance_frequency:.9f} GHz\n"
-        f"Error     : {error_khz:+.3f} kHz"
+        f"Residual  : {residual_khz:+.3f} kHz"
     )
 
     plt.text(
@@ -824,7 +824,7 @@ def run_controller(atc):
                     # Tuning成功
                     # =================================================
 
-                    error_khz = (
+                    residual_khz = (
                         target_frequency
                         - final_f0
                     ) * 1e6
@@ -852,8 +852,8 @@ def run_controller(atc):
                     )
 
                     print(
-                        f"Final error     : "
-                        f"{error_khz:+.3f} kHz"
+                        f"Final residual  : "
+                        f"{residual_khz:+.3f} kHz"
                     )
 
                     print(

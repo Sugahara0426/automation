@@ -195,7 +195,7 @@ def handle_failure(
 # ============================================================
 
 def choose_feedback_slope(
-    error_hz,
+    residual_hz,
     slope_plus,
     slope_minus,
 ):
@@ -215,7 +215,7 @@ def choose_feedback_slope(
     # +step方向
     if slope_plus != 0:
 
-        required_plus = error_hz / slope_plus
+        required_plus = residual_hz / slope_plus
 
         if required_plus > 0:
             candidates.append(
@@ -229,7 +229,7 @@ def choose_feedback_slope(
     # -step方向
     if slope_minus != 0:
 
-        required_minus = error_hz / slope_minus
+        required_minus = residual_hz / slope_minus
 
         if required_minus < 0:
             candidates.append(
@@ -615,15 +615,15 @@ def tune_piezo(
                 print(e)
 
         # ====================================================
-        # 正式な誤差
+        # 目標周波数に対する残差
         # ====================================================
 
-        error_hz = (
+        residual_hz = (
             target_f0 * 1e9
             - f0_hz
         )
 
-        error_khz = error_hz / 1e3
+        residual_khz = residual_hz / 1e3
 
         print(
             "\nFeedback frequency:"
@@ -640,8 +640,8 @@ def tune_piezo(
         )
 
         print(
-            f"Error   : "
-            f"{error_khz:+.3f} kHz"
+            f"Residual: "
+            f"{residual_khz:+.3f} kHz"
         )
 
         # ====================================================
@@ -651,7 +651,7 @@ def tune_piezo(
         # final_f0として返す。
         # ====================================================
 
-        if abs(error_khz) <= tolerance_khz:
+        if abs(residual_khz) <= tolerance_khz:
 
             print(
                 "\nTarget frequency reached."
@@ -672,8 +672,8 @@ def tune_piezo(
             )
 
             print(
-                f"Final error     : "
-                f"{error_khz:+.3f} kHz"
+                f"Final residual  : "
+                f"{residual_khz:+.3f} kHz"
             )
 
             print(
@@ -687,7 +687,7 @@ def tune_piezo(
                     f"✅ {mode} Frequency Tuning Completed\n"
                     f"Target: {target_f0:.9f} GHz\n"
                     f"Final resonance: {f0:.9f} GHz\n"
-                    f"Error: {error_khz:+.3f} kHz"
+                    f"Residual: {residual_khz:+.3f} kHz"
                 ),
             )
 
@@ -698,7 +698,7 @@ def tune_piezo(
         # ====================================================
 
         slope, required_steps = choose_feedback_slope(
-            error_hz,
+            residual_hz,
             slope_plus,
             slope_minus,
         )
@@ -712,7 +712,7 @@ def tune_piezo(
                 mode=mode,
                 reason=(
                     "No valid feedback direction was found. "
-                    f"Error={error_khz:+.3f} kHz, "
+                    f"Residual={residual_khz:+.3f} kHz, "
                     f"slope_plus={slope_plus:+.3f}, "
                     f"slope_minus={slope_minus:+.3f}"
                 ),
