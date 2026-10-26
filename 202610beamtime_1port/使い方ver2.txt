@@ -155,18 +155,52 @@ Piezo調整
 
 
 
+Piezoの個別操作
 
 
+①スイッチをVNA側・使用するモードに切り替える
 
 
+% python Switchcontrol.py VNA TM110
 
 
+・TM210の場合はTM210を指定する。
 
+②ANC350を初期化する：piezo_move.py
+・ ANC350をUSBでWindows PCに接続する。
+・ Windows PCで piezo_move.py を実行し、初期化する。
+・ USBをWindows PCからLinux PCへ差し替える。
 
+②Linux PCでPythonを起動し、ANC350に接続する
+>>> from pylablib.devices import Attocube
+>>> atc = Attocube.ANC350()
+・frequency_controller.pyとの同時接続はできない
 
+TM110：axis1、TM210：axis2
 
+◯現在位置を確認する
+>>> atc.get_position(axis)
+・指定した軸の位置を表示する。単位はm。
+・>>> atc.get_position() で全軸の確認
 
+◯指定した位置へ移動する：絶対位置指定
+>>> atc.move_to(axis, 0.001)
+・例：位置 0.001 m へ移動する。
+・移動量ではなく、移動先の座標を指定する。
 
+◯現在位置から指定した距離だけ移動する：相対移動
+>>> atc.move_by(axis, 10e-6)
+・例：現在位置から ＋10 µm 移動する。
+・負方向なら-10e-6を指定する。
+
+◯指定したstep数だけ移動する
+>>> atc.move_by_steps(axis, 10, 0.01)
+・引数1：軸番号
+・引数2：移動step数。負方向なら-10などを指定する。
+・引数3：step間の待ち時間［秒］
+
+◯操作終了後、通信を閉じる
+>>> atc.close()
 パワーのfeedback
 
 ①パワー測定値の送信を開始する：RaS_NRP2_Operator.py
