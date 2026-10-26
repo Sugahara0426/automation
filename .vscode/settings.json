@@ -1,15 +1,12 @@
 {
   "latex-workshop.latex.tools": [
     {
-      "name": "latexmk-lualatex",
-      "command": "latexmk",
+      "name": "build-manual",
+      "command": "python3",
       "args": [
-        "-lualatex",
-        "-synctex=1",
-        "-interaction=nonstopmode",
-        "-file-line-error",
-        "-outdir=%OUTDIR%",
-        "%DOC%"
+        "%DIR%/build_manual.py",
+        "%DOC%",
+        "%OUTDIR%"
       ],
       "env": {
         "LC_ALL": "C"
@@ -18,9 +15,12 @@
   ],
   "latex-workshop.latex.recipes": [
     {
-      "name": "LuaLaTeX (latexmk)",
-      "tools": ["latexmk-lualatex"]
+      "name": "マニュアル PDF（版番号付き）",
+      "tools": [
+        "build-manual"
+      ]
     }
   ],
-  "latex-workshop.latex.recipe.default": "first"
+  "latex-workshop.latex.recipe.default": "first",
+  "latex-workshop.latex.outDir": "%DIR%/build"
 }
