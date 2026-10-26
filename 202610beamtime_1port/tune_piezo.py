@@ -535,15 +535,15 @@ def tune_piezo(
     # ========================================================
 
     for i in range(
-        1,
-        max_iterations + 1,
+        max_iterations,
     ):
 
         # ----------------------------------------------------
-        # Tuning 2以降は、まず共鳴が存在するか確認
+        # Tuning 0は傾き測定後・フィードバック移動前の基準状態。
+        # Tuning 1以降は、まず共鳴が存在するか確認
         # ----------------------------------------------------
 
-        if i > 1:
+        if i > 0:
 
             f0_hz = get_resonance_frequency(
                 znb,
@@ -575,7 +575,7 @@ def tune_piezo(
         )
 
         print(
-            f"Pre-save current : "
+            f"Resonance (trace): "
             f"{f0:.9f} GHz"
         )
 

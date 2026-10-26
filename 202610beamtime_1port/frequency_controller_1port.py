@@ -333,7 +333,7 @@ def save_vna_data(
     suffix = (
         f"{mode}_1port_input_TM110_"
         f"{target_frequency:.6f}GHz_"
-        f"tuning{tuning_index:02d}"
+        f"tuning{tuning_index}"
     )
 
     print(
@@ -471,7 +471,7 @@ def save_vna_data(
     )
 
     print(
-        f"Resonance : "
+        f"Resonance (mean S11): "
         f"{resonance_frequency:.9f} GHz"
     )
 
@@ -512,7 +512,7 @@ def save_vna_data(
         resonance_frequency,
         linestyle=":",
         label=(
-            "Resonance "
+            "Resonance (mean S11) "
             f"{resonance_frequency:.9f} GHz"
         ),
     )
@@ -525,11 +525,12 @@ def save_vna_data(
 
     info_text = (
         f"Input port: TM110 (1port)\n"
+        f"Mode      : {mode}\n"
         f"Tuning    : {tuning_index}\n"
-        f"Pre-save  : {current_frequency:.9f} GHz\n"
+        f"Resonance (trace): {current_frequency:.9f} GHz\n"
         f"Target    : {target_frequency:.9f} GHz\n"
-        f"Resonance : {resonance_frequency:.9f} GHz\n"
-        f"Residual  : {residual_khz:+.3f} kHz"
+        f"Resonance (mean S11): {resonance_frequency:.9f} GHz\n"
+        f"Residual (target - mean S11): {residual_khz:+.3f} kHz"
     )
 
     plt.text(
