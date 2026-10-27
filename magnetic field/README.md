@@ -54,7 +54,7 @@ fdiffを正方向の200超だけに限定する場合は `python3 magnetic_monit
 
 3回は同じCHの異なる測定時刻の有効データ3件です。同一時刻の再送、過去に戻った時刻はカウントしません。非数値・欠損・NaN・無限値はその指標の連続回数をリセットし、正常復帰とみなしません。
 
-送信形式は既存MuSEUM_KafkaProducer.pyのJSONを使用します。
+送信形式は既存MuSEUM_KafkaProducer.pyのJSONを使用します。周波数は実機の `proton_frequency` と既存Operatorの `frequency` の両方に対応し、両方ある場合は `proton_frequency` を優先します。
 
 ```json
 {"device_name":"MagneticField_CH1","data_type":"proton_frequency","value":{"timestamp":1793066400,"channel":1,"frequency":72391000,"freq_diff":0,"date":"2026/10/27","time":"11:00:00"}}

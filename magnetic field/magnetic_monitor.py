@@ -68,7 +68,11 @@ class Monitor:
             if previous is not None and timestamp - previous > self.max_age:
                 status["count"] = 0
             try:
-                raw = value.get(key)
+                # 実機はproton_frequency、既存Operatorはfrequencyを使用。
+                if metric == "frequency" and "proton_frequency" in value:
+                    raw = value["proton_frequency"]
+                else:
+                    raw = value.get(key)
                 if isinstance(raw, bool):
                     raise ValueError()
                 number = float(raw)
