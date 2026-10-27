@@ -33,6 +33,7 @@ class Monitor:
         if not isinstance(self.state.get("channels"), dict) or not isinstance(self.state.get("outbox"), list):
             raise ValueError("Invalid state file")
         self.max_age = max_age
+        self.latest = {}  # 起動後に受信したデータのみ。保存状態とは分ける。
 
     def handle(self, payload, now=None):
         if not isinstance(payload, dict):
@@ -61,6 +62,7 @@ class Monitor:
         ch = self.state["channels"].setdefault(channel, {"last_timestamp": None, "metrics": {}})
         if ch["last_timestamp"] is not None and timestamp <= ch["last_timestamp"]:
             return False  # replay, duplicate, or out-of-order sample
+        self.latest[channel] = dict(value)
         previous = ch["last_timestamp"]
         ch["last_timestamp"] = timestamp
         for metric, key in (("frequency", "frequency"), ("fdiff", "freq_diff")):
@@ -106,6 +108,20 @@ class Monitor:
             self.state["outbox"].append(text)
             LOG.info("%s CH%s %s=%s", label, channel, metric, number)
         return True
+
+
+    def log_status(self, now=None):
+        now = time.time() if now is None else now
+        for channel in ("1", "2", "3", "4"):
+            value = self.latest.get(channel)
+            if value is None:
+                LOG.info("受信状況 CH%s: 起動後の有効時刻データは未受信", channel)
+                continue
+            frequency = value.get("proton_frequency", value.get("frequency"))
+            age = now - float(value["timestamp"])
+            freshness = "更新停止/遅延" if age > self.max_age else "受信済み"
+            LOG.info("受信状況 CH%s: %s frequency=%r freq_diff=%r 測定から%.1f秒",
+                     channel, freshness, frequency, value.get("freq_diff"), age)
 
 
 def save_state(path, state):
@@ -192,6 +208,7 @@ def main():
         max_poll_records=100,
     )
     LOG.info("Monitoring MagneticField_CH1-CH4; dry_run=%s", args.dry_run)
+    next_status = time.monotonic() + 30
     try:
         while True:
             records = consumer.poll(timeout_ms=1000)
@@ -206,6 +223,9 @@ def main():
                     else:
                         dirty = monitor.handle(payload) or dirty
                     offsets[TopicPartition(record.topic, record.partition)] = OffsetAndMetadata(record.offset + 1, "")
+            if time.monotonic() >= next_status:
+                monitor.log_status()
+                next_status = time.monotonic() + 30
             if args.dry_run:
                 for text in monitor.state["outbox"]:
                     print(text, flush=True)
