@@ -19,7 +19,7 @@ BASE = Path(__file__).resolve().parent
 SLACK_BOT_TOKEN = ""
 MAGNETIC_SLACK_CHANNEL_ID = "C0CC7H319NX"  # magnetic-probe
 
-RULES = {"frequency_min": 72390900, "frequency_max": 72391100,
+RULES = {"frequency_min": 72380000, "frequency_max": 72397000,
          "fdiff_limit": 200, "absolute_fdiff": True, "consecutive": 3}
 
 
