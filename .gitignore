@@ -2,3 +2,6 @@
 
 # LaTeX build artifacts
 /build/
+__pycache__/
+*.pyc
+.DS_Store

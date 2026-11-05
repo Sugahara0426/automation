@@ -1,4 +1,3 @@
-# ============================================================
 # power_feedback.py
 #
 # Microwave Power Feedback Controller
@@ -24,8 +23,6 @@
 #
 #   feedback.stop()
 #
-# ============================================================
-
 import json
 import logging
 from pathlib import Path
@@ -40,35 +37,21 @@ from kafka import KafkaConsumer
 
 from RaS_SMB_100A import RaS_SMB_100A
 
-
-# ============================================================
 # Device settings
-# ============================================================
-
 AMP_IP = "192.168.12.229"
 
-
-# ============================================================
 # Kafka settings
-# ============================================================
-
 KAFKA_SERVER = "10.105.52.103:9092"
 KAFKA_TOPIC = "testdb"
-
 POWER_DEVICE = "RaS_NRP2"
 POWER_DATA_TYPE = "microwave_power"
 POWER_CHANNEL = "CH2"
 
-
-# ============================================================
 # Feedback default parameters
-# ============================================================
-
 # Conservative starting gains: PID output is added to AMP power in watts.
 DEFAULT_KP = 1.0
 DEFAULT_KI = 0.0
 DEFAULT_KD = 0.0
-
 DEFAULT_INTERVAL = 1.0
 DEFAULT_TARGET_POWER_W = 7e-6
 DEFAULT_FILTER_WINDOW = 1
@@ -77,19 +60,11 @@ DEFAULT_FILTER_WINDOW = 1
 INTEGRAL_WINDOW_TIME = 10.0
 POWER_TOO_LOW_W = 1e-12
 
-
-# ============================================================
 # AMP power limits
-# ============================================================
-
 AMP_MIN_POWER_DBM = -25.0
 AMP_MAX_POWER_DBM = -6.0
 
-
-# ============================================================
 # Utility helpers
-# ============================================================
-
 def clamp(value, lower, upper):
     return max(lower, min(upper, value))
 
@@ -101,35 +76,21 @@ def drain_queue(queue_obj):
         except queue.Empty:
             break
 
-
-# ============================================================
 # Unit conversion
-# ============================================================
-
 def dbm_to_w(dbm):
-    """
-    dBm -> W
-    """
+    # dBm -> W
     return (10.0 ** (dbm / 10.0)) * 1e-3
 
 
 def w_to_dbm(watt):
-    """
-    W -> dBm
-    """
-
+    # W -> dBm
     if watt <= 0:
         return AMP_MIN_POWER_DBM
 
     return 10.0 * np.log10(watt * 1000.0)
 
-
-# ============================================================
 # Power Feedback Controller
-# ============================================================
-
 class PowerFeedbackController:
-
     def __init__(
         self,
         kp=DEFAULT_KP,
@@ -141,7 +102,6 @@ class PowerFeedbackController:
         log_path=None,
         console_output=False,
     ):
-
         # Measurement logs go to a file so the interactive prompt stays usable.
         self.console_output = bool(console_output)
         if log_path is None:
@@ -156,81 +116,44 @@ class PowerFeedbackController:
         self._measurement_logger.addHandler(handler)
         self._measurement_logger.setLevel(logging.INFO)
 
-        # ----------------------------------------------------
         # Feedback parameters
-        # ----------------------------------------------------
-
         self.kp = float(kp)
         self.ki = float(ki)
         self.kd = float(kd)
-
         self.interval = float(interval)
         self.target_power_w = float(target_power_w)
         self.filter_window = int(filter_window)
 
-
-        # ----------------------------------------------------
         # Current AMP state
-        # ----------------------------------------------------
-
         self.frequency_ghz = None
-
         self.initial_amp_power_dbm = None
         self.current_amp_power_dbm = None
 
-
-        # ----------------------------------------------------
         # Current measured power
-        # ----------------------------------------------------
-
         self.measured_power_raw_w = None
         self.measured_power_filtered_w = None
 
-
-        # ----------------------------------------------------
         # State
-        # ----------------------------------------------------
-
         self.rf_on = False
         self.feedback_on = False
 
-
-        # ----------------------------------------------------
         # Thread control
-        # ----------------------------------------------------
-
         self.stop_event = threading.Event()
-
         self.kafka_thread = None
         self.feedback_thread = None
-
 
         # Kafka -> Feedback data
         self.power_queue = queue.Queue()
 
-
-        # ----------------------------------------------------
         # AMP connection
-        # ----------------------------------------------------
-
         self.amp = RaS_SMB_100A(AMP_IP)
 
-
-        # ----------------------------------------------------
         # Thread lock
-        # ----------------------------------------------------
-
         self.lock = threading.Lock()
 
-
-    # ========================================================
     # Parameter settings
-    # ========================================================
-
     def set_pid(self, kp=None, ki=None, kd=None):
-
         with self.lock:
-
             if kp is not None:
                 self.kp = float(kp)
 
@@ -240,9 +163,7 @@ class PowerFeedbackController:
             if kd is not None:
                 self.kd = float(kd)
 
-
     def set_interval(self, interval):
-
         interval = float(interval)
 
         if interval <= 0:
@@ -251,15 +172,11 @@ class PowerFeedbackController:
         with self.lock:
             self.interval = interval
 
-
     def set_target_power(self, target_power_w):
-
         with self.lock:
             self.target_power_w = float(target_power_w)
 
-
     def set_filter_window(self, filter_window):
-
         filter_window = int(filter_window)
 
         if filter_window < 1:
@@ -268,13 +185,8 @@ class PowerFeedbackController:
         with self.lock:
             self.filter_window = filter_window
 
-
-    # ========================================================
     # Kafka reader
-    # ========================================================
-
     def _kafka_reader(self):
-
         print("[PowerFeedback] Kafka reader started")
 
         consumer = KafkaConsumer(
@@ -288,7 +200,6 @@ class PowerFeedbackController:
 
         try:
             while not self.stop_event.is_set():
-
                 records = consumer.poll(timeout_ms=500)
 
                 for _, messages in records.items():
@@ -317,16 +228,11 @@ class PowerFeedbackController:
                         self.power_queue.put(power)
 
                 time.sleep(0.01)
-
         finally:
             consumer.close()
             print("[PowerFeedback] Kafka reader stopped")
 
-
-    # ========================================================
     # PID calculation
-    # ========================================================
-
     def _calculate_pid(
         self,
         target_power,
@@ -336,7 +242,6 @@ class PowerFeedbackController:
         integral_buffer,
         dt,
     ):
-
         error = target_power - measured_power
 
         integral_buffer.append(error)
@@ -353,28 +258,16 @@ class PowerFeedbackController:
 
         integral_sum = sum(integral_buffer)
         derivative = error - prev_error
-
         current_amp_power_w = dbm_to_w(current_amp_power_dbm)
-
-        output = (
-            self.kp * error
-            + self.ki * integral_sum
-            + self.kd * derivative
-        )
-
+        output = (self.kp * error + self.ki * integral_sum + self.kd * derivative)
         new_amp_power_w = current_amp_power_w + output
         new_amp_power_dbm = w_to_dbm(new_amp_power_w)
         new_amp_power_dbm = clamp(new_amp_power_dbm, AMP_MIN_POWER_DBM, AMP_MAX_POWER_DBM)
 
         return new_amp_power_dbm, error
 
-
-    # ========================================================
     # Feedback loop
-    # ========================================================
-
     def _feedback_loop(self):
-
         print("[PowerFeedback] Waiting for NRP2 CH2 data...")
 
         prev_error = 0.0
@@ -391,7 +284,6 @@ class PowerFeedbackController:
         print("[PowerFeedback] Feedback ON")
 
         while not self.stop_event.is_set():
-
             try:
                 measured_raw = self.power_queue.get(timeout=2.0)
             except queue.Empty:
@@ -456,123 +348,50 @@ class PowerFeedbackController:
 
         print("[PowerFeedback] Feedback OFF")
 
-
-    # ========================================================
     # START
-    # ========================================================
-
-    def start(
-        self,
-        frequency_ghz,
-        target_power_w=None,
-        initial_amp_power_dbm=-30.0,
-    ):
-        """
-        Power Feedback開始
-
-        Sequence:
-            Frequency設定
-            -> Initial AMP Power設定
-            -> RF ON
-            -> Kafka CH2受信
-            -> Feedback
-        """
-
-
+    def start(self, frequency_ghz, target_power_w=None, initial_amp_power_dbm=-30.0):
+        # Power Feedback開始
+        #
+        # Sequence:
+        #     Frequency設定
+        #     -> Initial AMP Power設定
+        #     -> RF ON
+        #     -> Kafka CH2受信
+        #     -> Feedback
         if self.rf_on:
-
-            print(
-                "[PowerFeedback] "
-                "Already running"
-            )
+            print("[PowerFeedback] " "Already running")
 
             return
 
-
-        frequency_ghz = float(
-            frequency_ghz
-        )
-
-        initial_amp_power_dbm = float(
-            initial_amp_power_dbm
-        )
-
+        frequency_ghz = float(frequency_ghz)
+        initial_amp_power_dbm = float(initial_amp_power_dbm)
 
         if target_power_w is not None:
+            self.set_target_power(target_power_w)
 
-            self.set_target_power(
-                target_power_w
-            )
-
-
-        # ----------------------------------------------------
         # Initial AMP Power limit
-        # ----------------------------------------------------
+        initial_amp_power_dbm = clamp(initial_amp_power_dbm, AMP_MIN_POWER_DBM, AMP_MAX_POWER_DBM)
 
-        initial_amp_power_dbm = clamp(
-            initial_amp_power_dbm,
-            AMP_MIN_POWER_DBM,
-            AMP_MAX_POWER_DBM,
-        )
-
-
-        # ----------------------------------------------------
         # Queue clear
-        # ----------------------------------------------------
-
         drain_queue(self.power_queue)
 
-
-        # ----------------------------------------------------
         # State
-        # ----------------------------------------------------
-
         with self.lock:
+            self.frequency_ghz = (frequency_ghz)
+            self.initial_amp_power_dbm = (initial_amp_power_dbm)
+            self.current_amp_power_dbm = (initial_amp_power_dbm)
 
-            self.frequency_ghz = (
-                frequency_ghz
-            )
-
-            self.initial_amp_power_dbm = (
-                initial_amp_power_dbm
-            )
-
-            self.current_amp_power_dbm = (
-                initial_amp_power_dbm
-            )
-
-
-        # ----------------------------------------------------
         # AMP Frequency
-        # ----------------------------------------------------
+        self.amp.SetFrequency(frequency_ghz * 1e9)
 
-        self.amp.SetFrequency(
-            frequency_ghz
-            * 1e9
-        )
-
-
-        # ----------------------------------------------------
         # Initial AMP Power
-        # ----------------------------------------------------
+        self.amp.SetPower(initial_amp_power_dbm)
 
-        self.amp.SetPower(
-            initial_amp_power_dbm
-        )
-
-
-        # ----------------------------------------------------
         # RF ON
-        # ----------------------------------------------------
-
-        self.amp.SetIO(
-            "ON"
-        )
-
+        self.amp.SetIO("ON")
 
         with self.lock:
             self.rf_on = True
-
 
         print(
             "[PowerFeedback] "
@@ -581,121 +400,51 @@ class PowerFeedbackController:
             f"{initial_amp_power_dbm:.2f} dBm"
         )
 
-
-        # ----------------------------------------------------
         # Threads start
-        # ----------------------------------------------------
-
         self.stop_event.clear()
 
-
-        self.kafka_thread = threading.Thread(
-            target=
-                self._kafka_reader,
-            daemon=True
-        )
-
-
-
-        self.feedback_thread = threading.Thread(
-            target=
-                self._feedback_loop,
-            daemon=True
-        )
-
+        self.kafka_thread = threading.Thread(target= self._kafka_reader, daemon=True)
+        self.feedback_thread = threading.Thread(target= self._feedback_loop, daemon=True)
 
         print(f"[PowerFeedback] Measurement log: {self.log_path}")
         self.kafka_thread.start()
         self.feedback_thread.start()
 
-
-    # ========================================================
     # STOP
-    # ========================================================
-
     def stop(self):
-        """
-        Feedback停止
-          -> RF OFF
-        """
-
-
+        # Feedback停止
+        #   -> RF OFF
         if not self.rf_on:
-
-            print(
-                "[PowerFeedback] "
-                "Already stopped"
-            )
+            print("[PowerFeedback] " "Already stopped")
 
             return
 
+        print("[PowerFeedback] " "Stopping...")
 
-        print(
-            "[PowerFeedback] "
-            "Stopping..."
-        )
-
-
-        # ----------------------------------------------------
         # Feedback / Kafka stop
-        # ----------------------------------------------------
-
         self.stop_event.set()
 
+        if (self.feedback_thread is not None):
+            self.feedback_thread.join(timeout=3)
 
-        if (
-            self.feedback_thread
-            is not None
-        ):
+        if (self.kafka_thread is not None):
+            self.kafka_thread.join(timeout=3)
 
-            self.feedback_thread.join(
-                timeout=3
-            )
-
-
-        if (
-            self.kafka_thread
-            is not None
-        ):
-
-            self.kafka_thread.join(
-                timeout=3
-            )
-
-
-        # ----------------------------------------------------
         # RF OFF
-        # ----------------------------------------------------
-
-        self.amp.SetIO(
-            "OFF"
-        )
-
+        self.amp.SetIO("OFF")
 
         with self.lock:
-
             self.rf_on = False
             self.feedback_on = False
-
 
         self.feedback_thread = None
         self.kafka_thread = None
 
+        print("[PowerFeedback] " "RF OFF")
 
-        print(
-            "[PowerFeedback] "
-            "RF OFF"
-        )
-
-
-    # ========================================================
     # Current status
-    # ========================================================
-
     def get_status(self):
-
         with self.lock:
-
             return {
 
                 "log_path": self.log_path,

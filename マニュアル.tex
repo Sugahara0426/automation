@@ -7,13 +7,13 @@
 \usepackage{xcolor}
 \usepackage{fvextra}
 \usepackage[unicode,hidelinks]{hyperref}
-\DefineVerbatimEnvironment{command}{Verbatim}{breaklines=true,breakanywhere=true,fontsize=\small,frame=single,rulecolor=\color{gray},framesep=3mm}
+\DefineVerbatimEnvironment{command}{Verbatim}{samepage=true,breaklines=true,breakanywhere=true,fontsize=\small,frame=single,rulecolor=\color{gray},framesep=3mm}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.45em}
 % 更新時は版番号・更新日を変更し、下の更新履歴に行を追加する。
 % 内容の修正・追記では小数部を、大きな構成変更では整数部を更新する。
-\newcommand{\documentversion}{2.1}
-\newcommand{\documentupdated}{2026年10月26日}
+\newcommand{\documentversion}{2.2}
+\newcommand{\documentupdated}{2026年11月4日}
 \title{MuSEUM実験\\計測・制御プログラム操作マニュアル\\[0.5em]\large 第\documentversion 版}
 \author{}
 \date{最終更新：\documentupdated}
@@ -26,6 +26,7 @@
 \hline
 2.0 & 2026年10月26日 & LaTeX版を作成。 \\
 2.1 & 2026年10月26日 & 表題と更新履歴の記載を修正。 \\
+2.2 & 2026年11月4日 & Linux直接接続・toolsによる個別操作に変更。最大反復10回、Tuning 0開始・完了PNGの表示を反映。 \\
 \hline
 \end{tabular}
 \clearpage
@@ -191,17 +192,10 @@
 
 \end{itemize}
 
-\subsection{ANC350を初期化する：piezo\_move.py}
+\subsection{ANC350をLinux PCに接続する}
 
-\begin{itemize}
-
-\item ANC350をUSBでWindows PCに接続する。
-
-\item Windows PCで piezo\_move.py を実行し、初期化する。
-
-\item USBをWindows PCからLinux PCへ差し替える。
-
-\end{itemize}
+ANC350をUSBでLinux PCに直接接続する。
+Windows PCでの事前接続・初期化と、USBの差し替えは不要。
 
 \subsection{Linux PCで受信プログラムを起動する：frequency\_controller.py}
 
@@ -253,6 +247,20 @@
 
 \end{command}
 
+\subsection{調整条件と保存ファイル}
+
+\begin{itemize}
+\item 目標との差が$\pm10$ kHz以内で完了。最大反復回数は10回。
+\item 正負のslope測定後、フィードバック移動前のグラフを \texttt{tuning00} として保存する。
+\item 以降は \texttt{tuning01}、\texttt{tuning02}と続く。
+\item 完了したPNGは \texttt{tuning03\_final.png} などとなり、図にも(Final)を表示する。
+\end{itemize}
+
+各回の移動前にVNAを10回測定し、平均CSV・PNGをcontrollerと同じ場所の
+\texttt{data/YYYYMMDD/}、生データCSVをその中の \texttt{raw\_data/} に保存する。
+CSVにはfinalを付けない。ピエゾの位置・駆動設定は自動保存しない。
+controllerは駆動電圧・周波数を自動設定しないため、変更する場合は起動前に設定する。
+
 \section{Piezoの個別操作}
 
 \subsection{スイッチをVNA側・使用するモードに切り替える}
@@ -269,25 +277,18 @@
 
 \end{itemize}
 
-\subsection{ANC350を初期化する：piezo\_move.py}
+\subsection{ANC350をLinux PCに接続する}
 
-\begin{itemize}
-
-\item ANC350をUSBでWindows PCに接続する。
-
-\item Windows PCで piezo\_move.py を実行し、初期化する。
-
-\item USBをWindows PCからLinux PCへ差し替える。
-
-\end{itemize}
+ANC350をUSBでLinux PCに直接接続する。
+Windows PCでの事前接続・初期化と、USBの差し替えは不要。
 
 \subsection{Linux PCでPythonを起動し、ANC350に接続する}
 
 \begin{command}
 
->>> from pylablib.devices import Attocube
+>>> import piezo_tools
 
->>> atc = Attocube.ANC350()
+>>> atc = piezo_tools.connect_piezo()
 
 \end{command}
 
@@ -300,77 +301,67 @@
 TM110：axis1、TM210：axis2
 
 
-\subsection{現在位置を確認する}
+\subsection{現在位置・駆動設定を確認する}
 
 \begin{command}
-
->>> atc.get_position(axis)
-
+>>> piezo_tools.get_position(atc)
+>>> piezo_tools.get_drive_settings(atc)
 \end{command}
 
-\begin{itemize}
+全軸の位置［m］、ステップ電圧・周波数などを表示する。
 
-\item 指定した軸の位置を表示する。単位はm。
-
-\item >>> atc.get\_position() で全軸の確認
-
-\end{itemize}
-
-\subsection{指定した位置へ移動する：絶対位置指定}
+\subsection{ステップ電圧・周波数を設定する}
 
 \begin{command}
-
->>> atc.move_to(axis, 0.001)
-
+>>> piezo_tools.set_step_voltage(atc, 1, 30.0)
+>>> piezo_tools.set_step_frequency(atc, 1, 1500)
 \end{command}
 
-\begin{itemize}
-
-\item 例：位置 0.001 m へ移動する。
-
-\item 移動量ではなく、移動先の座標を指定する。
-
-\end{itemize}
-
-\subsection{現在位置から指定した距離だけ移動する：相対移動}
-
-\begin{command}
-
->>> atc.move_by(axis, 10e-6)
-
-\end{command}
-
-\begin{itemize}
-
-\item 例：現在位置から ＋10 µm 移動する。
-
-\item 負方向なら-10e-6を指定する。
-
-\end{itemize}
+第2引数は軸番号。電圧［V］と周波数［Hz］を設定する。
+設定変更後はslopeを測り直す（自動調整の開始時に測定される）。
 
 \subsection{指定したstep数だけ移動する}
 
 \begin{command}
 
->>> atc.move_by_steps(axis, 10, 0.01)
+>>> piezo_tools.move_steps(atc, axis, 10, delay=0.01, settle=1.0)
 
 \end{command}
 
 \begin{itemize}
 
-\item 引数1：軸番号
+\item atcの次の引数：軸番号
 
-\item 引数2：移動step数。負方向なら-10などを指定する。
+\item その次の引数：移動step数。負方向なら-10などを指定する。
 
-\item 引数3：step間の待ち時間［秒］
+\item delay：step間の待ち時間、settle：移動後の待ち時間［秒］
 
 \end{itemize}
+
+\subsection{初期位置へ戻す}
+
+\begin{command}
+>>> ok = piezo_tools.reset_position(atc, axes=(1,))
+\end{command}
+
+axes=(1,)はTM110のみ。axesを省略するとTM110・TM210の両軸を戻す。
+初期位置はTM110が7.090 mm、TM210が4.185 mm。
+許容誤差は50 $\mu$m、待機上限は30秒。
+現在位置から0.5 mmを超えて離れた目標への移動は拒否される。
+
+\subsection{位置・駆動設定を保存する}
+
+\begin{command}
+>>> means = piezo_tools.measure_and_save(atc, suffix_arg="check")
+\end{command}
+
+実行フォルダの \texttt{data/YYYYMMDD/RunNNN/} に平均位置・駆動設定と生データのCSVを保存する。
 
 \subsection{操作終了後、通信を閉じる}
 
 \begin{command}
 
->>> atc.close()
+>>> piezo_tools.disconnect_piezo(atc)
 
 \end{command}
 
@@ -519,25 +510,21 @@ PIDの係数を変更する
 
 TM110・TM210の両方を、TM110側の入力ポートで測定する。
 
+\subsection{スイッチを切り替える}
 
-\subsection{スイッチ操作はSwitchcontrol\_1port.pyを使用する}
+\begin{command}
+% python Switchcontrol_1port.py VNA TM110
+\end{command}
 
-\begin{itemize}
+TM110／TM210のどちらを指定しても、物理入力はTM110側に固定される。
 
-\item TM110／TM210のどちらを指定しても、物理入力はTM110側に固定される。
+\subsection{Piezo調整の受信側を起動する}
 
-\end{itemize}
+\begin{command}
+% python frequency_controller_1port.py
+\end{command}
 
-\subsection{Piezo調整の受信側はfrequency\_controller\_1port.pyを使用する}
-
-\begin{itemize}
-
-\item 周波数調整の処理・piezo軸・周波数範囲は従来版と同じ
-
-\item 保存するCSV・PNGの名前に1port\_input\_TM110を追加。
-
-\item 保存する図に、入力がTM110側であることを表示。
-
-\end{itemize}
+送信方法・周波数の単位・調整条件は通常版と同じ。
+保存するCSV・PNGの名前に1port\_input\_TM110が付き、図にも入力ポートを表示する。
 
 \end{document}

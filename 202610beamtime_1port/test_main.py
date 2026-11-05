@@ -5,7 +5,7 @@ import vna_tools
 def main():
   rm = pyvisa.ResourceManager('@py')
   resource_string = 'TCPIP0::192.168.12.4::inst0::INSTR'
-  
+
   # 1. 接続
   try:
     znb = vna_tools.get_vna_resource(rm, resource_string)

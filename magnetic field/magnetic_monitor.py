@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent Kafka -> Slack magnetic-field monitor. Python 3.9+."""
+# Independent Kafka -> Slack magnetic-field monitor. Python 3.9+.
 import argparse
 import fcntl
 import json
@@ -108,7 +108,6 @@ class Monitor:
             self.state["outbox"].append(text)
             LOG.info("%s CH%s %s=%s", label, channel, metric, number)
         return True
-
 
     def log_status(self, now=None):
         now = time.time() if now is None else now
@@ -244,7 +243,6 @@ def main():
         consumer.close()
         if lock:
             lock.close()
-
 
 if __name__ == "__main__":
     main()
