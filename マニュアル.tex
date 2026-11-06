@@ -13,7 +13,7 @@
 % 更新時は版番号・更新日を変更し、下の更新履歴に行を追加する。
 % 内容の修正・追記では小数部を、大きな構成変更では整数部を更新する。
 \newcommand{\documentversion}{2.2}
-\newcommand{\documentupdated}{2026年11月4日}
+\newcommand{\documentupdated}{2026年11月6日}
 \title{MuSEUM実験\\計測・制御プログラム操作マニュアル\\[0.5em]\large 第\documentversion 版}
 \author{}
 \date{最終更新：\documentupdated}
@@ -26,7 +26,7 @@
 \hline
 2.0 & 2026年10月26日 & LaTeX版を作成。 \\
 2.1 & 2026年10月26日 & 表題と更新履歴の記載を修正。 \\
-2.2 & 2026年11月4日 & Linux直接接続・toolsによる個別操作に変更。最大反復10回、Tuning 0開始・完了PNGの表示を反映。 \\
+2.2 & 2026年11月6日 & Linux直接接続・toolsによる個別操作に変更。最大反復10回、Tuning 0開始・完了PNGの表示、パワー制御の引数省略を反映。 \\
 \hline
 \end{tabular}
 \clearpage
@@ -411,15 +411,23 @@ axes=(1,)はTM110のみ。axesを省略するとTM110・TM210の両軸を戻す�
 
 \begin{itemize}
 
-\item frequency\_ghz：AMPの周波数［GHz］
+\item frequency\_ghz：AMPの周波数［GHz］。必須。省略できない。
 
-\item target\_power\_w：NRP2 CH2で測定する目標パワー［W］
+\item target\_power\_w：NRP2 CH2で測定する目標パワー［W］。省略時は現在の設定値を使う（初期値7 $\mu$W）。
 
-\item initial\_amp\_power\_dbm：開始時のAMP出力［dBm］
+\item initial\_amp\_power\_dbm：開始時のAMP出力［dBm］。省略時は既定値$-30$ dBm。ただし現在の下限制限により実際は$-25$ dBm。
 
 \item 周波数設定 → 初期AMP出力設定 → AMP出力ON → フィードバック開始まで行う。
 
 \end{itemize}
+
+デフォルト値とAMP出力の上限・下限は、power\_feedback.pyの冒頭にまとめて記載している。
+
+周波数だけを指定して開始する場合：
+
+\begin{command}
+>>> feedback.start(frequency_ghz=1.8974)
+\end{command}
 
 \subsection{設定の変更}
 

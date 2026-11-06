@@ -54,6 +54,7 @@ DEFAULT_KI = 0.0
 DEFAULT_KD = 0.0
 DEFAULT_INTERVAL = 1.0
 DEFAULT_TARGET_POWER_W = 7e-6
+DEFAULT_INITIAL_AMP_POWER_DBM = -30.0
 DEFAULT_FILTER_WINDOW = 1
 
 # 積分項は直近10秒分
@@ -349,7 +350,7 @@ class PowerFeedbackController:
         print("[PowerFeedback] Feedback OFF")
 
     # START
-    def start(self, frequency_ghz, target_power_w=None, initial_amp_power_dbm=-30.0):
+    def start(self, frequency_ghz, target_power_w=None, initial_amp_power_dbm=DEFAULT_INITIAL_AMP_POWER_DBM):
         # Power Feedback開始
         #
         # Sequence:
